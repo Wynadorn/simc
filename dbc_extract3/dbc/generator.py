@@ -1438,6 +1438,10 @@ class SpellDataGenerator(DataGenerator):
             ( 346112, 0 ),          # Shadow Weaving Mastery Pet Proc spell
             ( 336167, 0 ),          # Painbreaker Psalm Insanity generation
             ( 341207, 0 ),          # Dark Thoughts Buff
+            ( 344753, 0 ),          # Eternal Call to the Void Parent spell
+            ( 336373, 0 ),          # Cauterizing Shadows heal spell
+            ( 323707, 0 ),          # Mindgames Healing reversal Damage spell
+            ( 323706, 0 ),          # Mindgames Damage reversal Healing spell
             # Holy Priest
             ( 196809, 5 ),          # Healing Light (Divine Image legendary pet spell)
             ( 196810, 5 ),          # Dazzling Light (Divine Image legendary pet spell)
@@ -1480,7 +1484,7 @@ class SpellDataGenerator(DataGenerator):
           ( 317791, 5 ), ( 317792, 5), # Magus of the Dead's (army of the damned talent) Frostbolt and Shadow Bolt spells
           ( 324165, 0 ), # Night Fae's Death's Due Strength Buff
           ( 220890, 5 ), # Dancing Rune Weapon's RP generation spell from Heart Strike
-
+          ( 334895, 5 ), # Frenzied Monstrosity Buff that appears on the main ghoul pet (different from the player buff)
         ),
 
         # Shaman:

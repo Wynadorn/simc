@@ -1,4 +1,4 @@
-SimulationCraft 902-01 for World of Warcraft 9.0.2.36839 Live (hotfix 2020-12-12/36839, git build shadowlands f2728acc92)
+SimulationCraft 902-01 for World of Warcraft 9.0.2.37142 Live (hotfix 2021-01-08/37142, no-networking)
 
 Name             : Dual Wield (desc=Passive) (id=674) [Passive] 
 Class            : Frost Warrior, Hunter, Rogue, Death Knight, Monk, Demon Hunter
@@ -827,7 +827,6 @@ $high=${$<stnc>*($<dwm>*(($MWB)/($MWS)+$<offm>*$<offhigh>)+$AP/3.5+1)}
 
 
 Name             : Stagger (id=115069) [Spell Family (53), Passive] 
-Hotfixed         : Attributes
 Class            : Brewmaster Death Knight, Monk
 School           : Physical
 Spell Type       : Melee
@@ -3460,7 +3459,7 @@ Effects          :
 #11 (id=260842)   : Apply Aura (6) | Modify Total Stat% (137)
                    Base Value: 30 | Scaled Value: 30 | PvP Coefficient: 1.00000 | Misc Value 2: 0x4 | Target: Self (1)
 #12 (id=260843)   : Apply Aura (6) | Threat (10)
-                   Base Value: 400 | Scaled Value: 400 | PvP Coefficient: 1.00000 | Misc Value: 127 | Target: Self (1)
+                   Base Value: 450 | Scaled Value: 450 | PvP Coefficient: 1.00000 | Misc Value: 127 | Target: Self (1)
 #13 (id=260844)   : Apply Aura (6) | Modify Attacker Melee Crit Chance (187)
                    Base Value: -6 | Scaled Value: -6 | PvP Coefficient: 1.00000 | Target: Self (1)
 #14 (id=260845)   : Apply Aura (6) | Add Flat Modifier (107): Spell Global Cooldown (21)
@@ -4115,7 +4114,7 @@ Effects          :
 #1 (id=240042)   : Instant Kill (1)
                    Base Value: 1 | Scaled Value: 1 | PvP Coefficient: 1.00000 | Target: Enemy (6)
 #2 (id=776638)   : Dummy (3)
-                   Base Value: 120 | Scaled Value: 120 | PvP Coefficient: 1.00000 | Target: Enemy (6)
+                   Base Value: 50 | Scaled Value: 50 | PvP Coefficient: 1.00000 | Target: Enemy (6)
 #3 (id=776639)   : Dummy (3)
                    Base Value: 20 | Scaled Value: 20 | PvP Coefficient: 1.00000 | Target: Enemy (6)
 Description      : Instantly kills any creature under level $m2, or player under $m3% health.
@@ -9793,7 +9792,6 @@ Description      : Summon an effigy of Chi-Ji that kicks up a Gust of Mist when 
 Chi-Ji's presence makes you immune to movement impairing effects.
 
 Name             : Dance of Chi-Ji (id=325201) [Scaling Spell (-1), Spell Family (53), Passive, Hidden] 
-Hotfixed         : Proc Flags (4112 -> 5136)
 Class            : Monk
 School           : Physical
 Spell Type       : None
@@ -9969,7 +9967,7 @@ Spell Type       : Magic
 Range            : 50000 yards
 Attributes       : ........ ........ ........ ........   ........ ........ ........ ........ 
                  : ..x..... ........ ........ .....x..   ........ ........ ........ ......x. 
-                 : ........ ........ ........ ........   ........ ........ ........ ........ 
+                 : ........ x....... ........ ........   ........ ........ ........ ........ 
                  : ........ ........ ........ .....x..   ........ ........ ........ ........ 
                  : ........ .....x.. ........ ........   ........ ........ ........ ........ 
                  : ........ ........ ........ ........   ........ ........ ........ ........ 
@@ -9989,7 +9987,7 @@ Range            : 50000 yards
 Attributes       : ........ ........ ........ ........   ........ ........ ........ ........ 
                  : ..x..... ........ ........ .....x..   ........ ........ ........ ......x. 
                  : ........ ........ ........ ........   ........ ........ ........ ........ 
-                 : ........ ........ ........ .....x..   ........ ........ ........ ........ 
+                 : ........ ........ ........ ...x.x..   ........ ........ ........ ........ 
                  : ........ .....x.. ........ ........   ........ ........ ....x... x....... 
                  : ........ ........ ........ ........   ........ ........ ........ ........ 
                  : ........ ........ ........ ........   x....... ........ ........ ........ 
@@ -11187,10 +11185,6 @@ Effects          :
 Name             : Clouded Focus (id=337343) [Spell Family (53), Passive] 
 School           : Physical
 Spell Type       : None
-Internal Cooldown: 0.1 seconds
-Proc Chance      : 100%
-Proc Flags       : ........ ......x. ........ ........ 
-                 : Magic Heal
 Attributes       : ......x. ........ ........ .......x   ........ ..x..... ........ ........ 
                  : ........ ........ ........ ....x...   ........ ........ xx..x... ........ 
                  : ........ ........ .......x ........   ........ ........ ........ ........ 
@@ -11201,7 +11195,7 @@ Attributes       : ......x. ........ ........ .......x   ........ ..x..... .....
                  : ........ ........ ........ ........   
                  : Passive (6), Cannot cancel aura (31), Disable player procs (112), Disable target procs (113), Disable weapon procs (151)
 Effects          :
-#1 (id=835312)   : Apply Aura (6) | Proc Trigger Spell (42): Clouded Focus
+#1 (id=835312)   : Apply Aura (6) | Dummy (4)
                    Base Value: 20 | Scaled Value: 20 | PvP Coefficient: 1.00000 | Trigger Spell: 337476 | Target: Self (1)
 Description      : Healing with Enveloping Mists or Vivify while channeling Soothing Mists increases their healing done by $337476m1% and reduces their mana cost by $337476m2%. Stacks up to $337476u times.
 

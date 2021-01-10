@@ -642,6 +642,7 @@ public:
   std::string default_flask() const override;
   std::string default_food() const override;
   std::string default_rune() const override;
+  std::string default_temporary_enchant() const override;
   void apply_affecting_auras( action_t& action ) override;
 
   target_specific_t<warlock_td_t> target_data;
@@ -1010,7 +1011,7 @@ struct demonic_synergy_callback_t : public dbc_proc_callback_t
   {
   }
 
-  void execute( action_t* /* a */, action_state_t* state ) override
+  void execute( action_t* /* a */, action_state_t* ) override
   {
     if ( owner->warlock_pet_list.active )
     {

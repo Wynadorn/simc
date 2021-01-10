@@ -45,7 +45,7 @@ struct drain_life_t : public warlock_spell_t
       return ta;
     }
 
-    double cost_per_tick( resource_e r ) const override
+    double cost_per_tick( resource_e ) const override
     {
       return 0.0;
     }
@@ -213,8 +213,8 @@ struct impending_catastrophe_impact_t : public warlock_spell_t
 
 struct impending_catastrophe_t : public warlock_spell_t
 {
-  action_t* impending_catastrophe_dot;
   action_t* impending_catastrophe_impact;
+  action_t* impending_catastrophe_dot;
 
   impending_catastrophe_t( warlock_t* p, util::string_view options_str ) : 
     warlock_spell_t( "impending_catastrophe", p, p->covenant.impending_catastrophe ),
@@ -690,6 +690,10 @@ double warlock_t::composite_player_pet_damage_multiplier( const action_state_t* 
 double warlock_t::composite_spell_crit_chance() const
 {
   double sc = player_t::composite_spell_crit_chance();
+
+  if ( buffs.dark_soul_instability->check() )
+    sc += buffs.dark_soul_instability->check_value();
+
   return sc;
 }
 
@@ -716,6 +720,10 @@ double warlock_t::composite_melee_haste() const
 double warlock_t::composite_melee_crit_chance() const
 {
   double mc = player_t::composite_melee_crit_chance();
+
+  if ( buffs.dark_soul_instability->check() )
+    mc += buffs.dark_soul_instability->check_value();
+
   return mc;
 }
 
@@ -1139,6 +1147,11 @@ std::string warlock_t::default_food() const
 std::string warlock_t::default_rune() const
 {
   return ( true_level >= 60 ) ? "veiled" : "disabled";
+}
+
+std::string warlock_t::default_temporary_enchant() const
+{
+  return ( true_level >= 60 ) ? "main_hand:shadowcore_oil" : "disabled";
 }
 
 void warlock_t::apl_global_filler()
@@ -1791,12 +1804,6 @@ struct warlock_module_t : public module_t
       .operation( hotfix::HOTFIX_SET )
       .modifier( 11.0 )
       .verification_value( 43.0 );
-
-    hotfix::register_effect("Warlock","2020-12-11","Upcoming Class Tuning: Chaos Bolt damage buffed by 22%", 132079)
-      .field( "sp_coefficient" )
-      .operation( hotfix::HOTFIX_SET )
-      .modifier( 1.464 )
-      .verification_value( 1.2 );
   }
 
   bool valid() const override

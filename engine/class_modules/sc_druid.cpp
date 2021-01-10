@@ -3,6 +3,7 @@
 // Send questions to natehieter@gmail.com
 // ==========================================================================
 
+#include "config.hpp"
 #include "simulationcraft.hpp"
 #include "player/covenant.hpp"
 
@@ -276,6 +277,7 @@ public:
   bool catweave_bear;
   bool owlweave_bear;
   bool owlweave_cat;
+  bool no_cds;
 
   bool affinity_resources;  // activate resources tied to affinities
   double kindred_spirits_partner_dps;
@@ -775,6 +777,7 @@ public:
       catweave_bear( false ),
       owlweave_bear( false ),
       owlweave_cat( true ),
+      no_cds( false ),
       affinity_resources( false ),
       kindred_spirits_partner_dps( 1.0 ),
       kindred_spirits_hide_partner( false ),
@@ -881,6 +884,7 @@ public:
   double temporary_movement_modifier() const override;
   double passive_movement_modifier() const override;
   double matching_gear_multiplier( attribute_e attr ) const override;
+  std::unique_ptr<expr_t> create_action_expression(action_t& a, util::string_view name_str) override;
   std::unique_ptr<expr_t> create_expression( util::string_view name ) override;
   action_t* create_action( util::string_view name, const std::string& options ) override;
   pet_t* create_pet( util::string_view name, util::string_view type ) override;
@@ -2192,173 +2196,6 @@ public:
 
     return ab::verify_actor_spec();
   }
-
-  std::unique_ptr<expr_t> create_expression( util::string_view name_str ) override
-  {
-    auto splits = util::string_split( name_str, "." );
-
-    if ( splits[ 0 ] == "dot" &&
-         ( splits[ 2 ] == "ticks_gained_on_refresh" || splits[ 2 ] == "ticks_gained_on_refresh_pmultiplier" ) )
-    {
-      // Since we know some action names don't map to the actual dot portion, lets add some exceptions
-      // this may have to be made more robust if other specs are interested in using it, but for now lets
-      // default any ambiguity to what would make most sense for ferals.
-      if ( splits[ 1 ] == "rake" )
-        splits[ 1 ] = "rake_bleed";
-      if ( p()->specialization() == DRUID_FERAL && splits[ 1 ] == "moonfire" )
-        splits[ 1 ] = "lunar_inspiration";
-
-      bool pmult_adjusted = false;
-      if ( splits[ 2 ] == "ticks_gained_on_refresh_pmultiplier" )
-        pmult_adjusted = true;
-
-      if ( splits[ 1 ] == "primal_wrath" )  // special case since pw applies in aoe
-      {
-        action_t* rip = p()->find_action( "rip" );
-        action_t* pw  = p()->find_action( "primal_wrath" );
-
-        return make_fn_expr( name_str, [pw, rip, pmult_adjusted]() -> double {
-          int cp = as<int>( pw->player->resources.current[ RESOURCE_COMBO_POINT ] );
-
-          double gained_ticks  = 0;
-          timespan_t duration  = rip->dot_duration * 0.5 * ( 1 + cp );
-          timespan_t tick_time = rip->base_tick_time * rip->composite_haste();
-
-          for ( player_t* pw_target : pw->targets_in_range_list( pw->target_list() ) )
-          {
-            timespan_t ttd         = pw_target->time_to_percent( 0 );
-            dot_t* dot             = pw_target->get_dot( "rip", pw->player );
-            double remaining_ticks = 0;
-            double potential_ticks = 0;
-            timespan_t durrem      = timespan_t::zero();
-            double pmult           = 0;
-
-            if ( dot->is_ticking() )
-            {
-              remaining_ticks = std::min( dot->remains(), ttd ) / tick_time;
-              durrem          = rip->calculate_dot_refresh_duration( dot, duration );
-              remaining_ticks *= pmult_adjusted ? dot->state->persistent_multiplier : 1.0;
-            }
-
-            if ( pmult_adjusted )
-            {
-              action_state_t* state = rip->get_state();
-
-              pw->snapshot_state( state, result_amount_type::NONE );
-              state->target = pw_target;
-
-              pmult = pw->composite_persistent_multiplier( state );
-
-              action_state_t::release( state );
-            }
-
-            potential_ticks = std::min( std::max( durrem, duration ), ttd ) / tick_time;
-            potential_ticks *= pmult_adjusted ? pmult : 1.0;
-            gained_ticks += potential_ticks - remaining_ticks;
-          }
-          return gained_ticks;
-        } );
-      }
-      else if ( splits[ 1 ] == "thrash_cat" )  // special case since pw applies in aoe
-      {
-        action_t* tc = p()->find_action( "thrash_cat" );
-
-        return make_fn_expr( name_str, [tc, pmult_adjusted]() -> double {
-          double gained_ticks  = 0;
-          timespan_t duration  = tc->dot_duration;
-          timespan_t tick_time = tc->base_tick_time * tc->composite_haste();
-
-          for ( player_t* tc_target : tc->targets_in_range_list( tc->target_list() ) )
-          {
-            timespan_t ttd         = tc_target->time_to_percent( 0 );
-            dot_t* dot             = tc_target->get_dot( "Thrash", tc->player );
-            double remaining_ticks = 0;
-            double potential_ticks = 0;
-            timespan_t durrem      = timespan_t::zero();
-            double pmult           = 0;
-
-            if ( dot->is_ticking() )
-            {
-              remaining_ticks = std::min( dot->remains(), ttd ) / tick_time;
-              durrem          = tc->calculate_dot_refresh_duration( dot, duration );
-              remaining_ticks *= pmult_adjusted ? dot->state->persistent_multiplier : 1.0;
-            }
-
-            if ( pmult_adjusted )
-            {
-              action_state_t* state = tc->get_state();
-
-              tc->snapshot_state( state, result_amount_type::NONE );
-              state->target = tc_target;
-
-              pmult = tc->composite_persistent_multiplier( state );
-
-              action_state_t::release( state );
-            }
-
-            potential_ticks = std::min( std::max( durrem, duration ), ttd ) / tick_time;
-            potential_ticks *= pmult_adjusted ? pmult : 1.0;
-            gained_ticks += potential_ticks - remaining_ticks;
-          }
-          return gained_ticks;
-        } );
-      }
-
-      action_t* action = p()->find_action( splits[ 1 ] );
-      if ( action )
-        return make_fn_expr( name_str, [action, pmult_adjusted]() -> double {
-          dot_t* dot             = action->get_dot();
-          double remaining_ticks = 0;
-          double potential_ticks = 0;
-          action_state_t* state  = action->get_state( dot->state );
-          timespan_t duration    = action->composite_dot_duration( state );
-          timespan_t ttd         = action->target->time_to_percent( 0 );
-          double pmult           = 0;
-
-          if ( dot->is_ticking() )
-          {
-            remaining_ticks = std::min( dot->remains(), ttd ) / dot->current_action->tick_time( dot->state );
-            duration        = action->calculate_dot_refresh_duration( dot, duration );
-            remaining_ticks *= pmult_adjusted ? dot->state->persistent_multiplier : 1.0;
-          }
-
-          if ( pmult_adjusted )
-          {
-            action->snapshot_state( state, result_amount_type::NONE );
-            state->target = action->target;
-
-            pmult = action->composite_persistent_multiplier( state );
-          }
-
-          potential_ticks = std::min( duration, ttd ) / action->tick_time( state );
-          potential_ticks *= pmult_adjusted ? pmult : 1.0;
-          action_state_t::release( state );
-          return potential_ticks - remaining_ticks;
-        } );
-      throw std::invalid_argument( "invalid action" );
-    }
-    else if ( splits[ 0 ] == "ticks_gained_on_refresh" )
-    {
-      return make_fn_expr( name_str, [this]() -> double {
-        dot_t* dot             = this->get_dot();
-        double remaining_ticks = 0;
-        double potential_ticks = 0;
-        timespan_t duration    = this->dot_duration;
-        timespan_t ttd         = this->target->time_to_percent( 0 );
-
-        if ( dot->is_ticking() )
-        {
-          remaining_ticks = std::min( dot->remains(), ttd ) / dot->current_action->tick_time( dot->state );
-          duration        = this->calculate_dot_refresh_duration( dot, duration );
-        }
-
-        potential_ticks = std::min( duration, ttd ) / ( this->base_tick_time * this->composite_haste() );
-        return potential_ticks - remaining_ticks;
-      } );
-    }
-
-    return ab::create_expression( name_str );
-  }
 };
 
 // Druid melee attack base for cat_attack_t and bear_attack_t
@@ -2497,11 +2334,11 @@ public:
 
   void execute() override
   {
-    if ( ab::time_to_execute > timespan_t::zero() && !ab::proc && !ab::background && reset_melee_swing )
+    if ( ab::trigger_gcd > 0_ms && !ab::proc && !ab::background && reset_melee_swing &&
+         ab::p()->main_hand_attack && ab::p()->main_hand_attack->execute_event )
     {
-      if ( ab::p()->main_hand_attack && ab::p()->main_hand_attack->execute_event )
-        ab::p()->main_hand_attack->execute_event->reschedule( ab::p()->main_hand_weapon.swing_time );
-      // Nothing for OH, as druids don't DW
+      ab::p()->main_hand_attack->execute_event->reschedule( ab::p()->main_hand_weapon.swing_time *
+                                                            ab::p()->cache.attack_speed() );
     }
 
     ab::execute();
@@ -2830,7 +2667,10 @@ struct moonfire_t : public druid_spell_t
   moonfire_t( druid_t* p, util::string_view options_str )
     : druid_spell_t( "moonfire", p, p->find_class_spell( "Moonfire" ), options_str )
   {
-    may_miss = may_crit = triggers_galactic_guardian = false;
+    may_miss = may_crit = false;
+
+    triggers_galactic_guardian = false;
+    reset_melee_swing = false;
 
     damage = p->get_secondary_action<moonfire_damage_t>( "moonfire_dmg" );
     damage->stats = stats;
@@ -3575,6 +3415,17 @@ struct feral_frenzy_driver_t : public cat_attack_t
     tick_action->stats = stats;
     dynamic_tick_action = true;
   }
+
+  void tick( dot_t* d ) override
+  {
+    auto f = get_state_free_cast( d->state );
+    if ( f )
+      stats = get_free_cast_stats( f );
+    else
+      stats = orig_stats;
+
+    cat_attack_t::tick( d );
+  }
 };
 
 // Ferocious Bite ===========================================================
@@ -3750,6 +3601,17 @@ struct lunar_inspiration_t : public cat_attack_t
       p()->buff.bt_moonfire->trigger();
   }
 
+  void tick( dot_t* d ) override
+  {
+    auto f = get_state_free_cast( d->state );
+    if ( f )
+      stats = get_free_cast_stats( f );
+    else
+      stats = orig_stats;
+
+    cat_attack_t::tick( d );
+  }
+
   bool ready() override
   {
     if ( !p()->talent.lunar_inspiration->ok() )
@@ -3820,7 +3682,7 @@ struct rake_t : public cat_attack_t
     if ( p->find_rank_spell( "Rake", "Rank 2" )->ok() )
       stealth_mul = data().effectN( 4 ).percent();
 
-    bleed = p->get_secondary_action<rake_bleed_t>( "rank_bleed" );
+    bleed = p->get_secondary_action<rake_bleed_t>( "rake_bleed" );
     bleed->stats = stats;
   }
 
@@ -4252,6 +4114,17 @@ struct thrash_cat_t : public cat_attack_t
     cat_attack_t::execute();
 
     p()->buff.bt_thrash->trigger();
+  }
+
+  void tick( dot_t* d ) override
+  {
+    auto f = get_state_free_cast( d->state );
+    if ( f )
+      stats = get_free_cast_stats( f );
+    else
+      stats = orig_stats;
+
+    cat_attack_t::tick( d );
   }
 };
 
@@ -4986,6 +4859,83 @@ struct auto_attack_t : public melee_attack_t
   }
 };
 
+// Form Spells ==============================================================
+
+struct druid_form_t : public druid_spell_t
+{
+  form_e form;
+  const spell_data_t* affinity;
+
+  druid_form_t( util::string_view n, druid_t* p, const spell_data_t* s, util::string_view opt, form_e f )
+    : druid_spell_t( n, p, s, opt ), form( f ), affinity( spell_data_t::nil() )
+  {
+    harmful               = false;
+    min_gcd               = 1.5_s;
+    ignore_false_positive = true;
+
+    form_mask         = ( NO_FORM | BEAR_FORM | CAT_FORM | MOONKIN_FORM ) & ~form;
+    may_autounshift   = false;
+    reset_melee_swing = false;
+
+    switch ( form )
+    {
+      case BEAR_FORM: affinity = p->talent.guardian_affinity; break;
+      case CAT_FORM: affinity = p->talent.feral_affinity; break;
+      case MOONKIN_FORM: affinity = p->talent.balance_affinity; break;
+      default: break;
+    }
+  }
+
+  void execute() override
+  {
+    druid_spell_t::execute();
+
+    p()->shapeshift( form );
+
+    if ( p()->legendary.oath_of_the_elder_druid->ok() && !p()->buff.oath_of_the_elder_druid->check() && affinity->ok() )
+    {
+      p()->buff.oath_of_the_elder_druid->trigger();
+      p()->buff.heart_of_the_wild->trigger(
+          timespan_t::from_seconds( p()->legendary.oath_of_the_elder_druid->effectN( 2 ).base_value() ) );
+    }
+  }
+};
+
+// Bear Form Spell ==========================================================
+
+struct bear_form_t : public druid_form_t
+{
+  bear_form_t( druid_t* p, util::string_view opt )
+    : druid_form_t( "bear_form", p, p->find_class_spell( "Bear Form" ), opt, BEAR_FORM )
+  {}
+
+  void execute() override
+  {
+    druid_form_t::execute();
+
+    if ( p()->conduit.ursine_vigor->ok() )
+      p()->buff.ursine_vigor->trigger();
+  }
+};
+
+// Cat Form Spell ===========================================================
+
+struct cat_form_t : public druid_form_t
+{
+  cat_form_t( druid_t* p, util::string_view opt )
+    : druid_form_t( "cat_form", p, p->find_class_spell( "Cat Form" ), opt, CAT_FORM )
+  {}
+};
+
+// Moonkin Form Spell =======================================================
+
+struct moonkin_form_t : public druid_form_t
+{
+  moonkin_form_t( druid_t* p, util::string_view opt )
+    : druid_form_t( "moonkin_form", p, p->spec.moonkin_form, opt, MOONKIN_FORM )
+  {}
+};
+
 // Barkskin =================================================================
 
 struct barkskin_t : public druid_spell_t
@@ -5014,39 +4964,6 @@ struct barkskin_t : public druid_spell_t
   }
 };
 
-// Bear Form Spell ==========================================================
-
-struct bear_form_t : public druid_spell_t
-{
-  bear_form_t( druid_t* player, util::string_view options_str )
-    : druid_spell_t( "bear_form", player, player->find_class_spell( "Bear Form" ), options_str )
-  {
-    form_mask       = NO_FORM | CAT_FORM | MOONKIN_FORM;
-    may_autounshift = false;
-
-    harmful               = false;
-    min_gcd               = timespan_t::from_seconds( 1.5 );
-    ignore_false_positive = true;
-  }
-
-  void execute() override
-  {
-    druid_spell_t::execute();
-
-    p()->shapeshift( BEAR_FORM );
-
-    if ( p()->legendary.oath_of_the_elder_druid->ok() && !p()->buff.oath_of_the_elder_druid->check() &&
-         p()->talent.guardian_affinity->ok() )
-    {
-      p()->buff.oath_of_the_elder_druid->trigger();
-      p()->buff.heart_of_the_wild->trigger(
-          timespan_t::from_seconds( p()->legendary.oath_of_the_elder_druid->effectN( 2 ).base_value() ) );
-    }
-
-    if ( p()->conduit.ursine_vigor->ok() )
-      p()->buff.ursine_vigor->trigger();
-  }
-};
 // Brambles =================================================================
 
 struct brambles_t : public druid_spell_t
@@ -5084,37 +5001,6 @@ struct bristling_fur_t : public druid_spell_t
     druid_spell_t::execute();
 
     p()->buff.bristling_fur->trigger();
-  }
-};
-
-// Cat Form Spell ===========================================================
-
-struct cat_form_t : public druid_spell_t
-{
-  cat_form_t( druid_t* player, util::string_view options_str )
-    : druid_spell_t( "cat_form", player, player->find_class_spell( "Cat Form" ), options_str )
-  {
-    form_mask       = NO_FORM | BEAR_FORM | MOONKIN_FORM;
-    may_autounshift = false;
-
-    harmful               = false;
-    min_gcd               = timespan_t::from_seconds( 1.5 );
-    ignore_false_positive = true;
-  }
-
-  void execute() override
-  {
-    druid_spell_t::execute();
-
-    p()->shapeshift( CAT_FORM );
-
-    if ( p()->legendary.oath_of_the_elder_druid->ok() && !p()->buff.oath_of_the_elder_druid->check() &&
-         p()->talent.feral_affinity->ok() )
-    {
-      p()->buff.oath_of_the_elder_druid->trigger();
-      p()->buff.heart_of_the_wild->trigger(
-          timespan_t::from_seconds( p()->legendary.oath_of_the_elder_druid->effectN( 2 ).base_value() ) );
-    }
   }
 };
 
@@ -5279,7 +5165,7 @@ struct moon_base_t : public druid_spell_t
       }
       cooldown->duration = s->charge_cooldown();
 
-      if ( cooldown->charges != 1 && cooldown->charges != s->charges() )
+      if ( cooldown->charges != 1 && cooldown->charges != as<int>( s->charges() ) )
       {
         sim->error( "Moon CD: {} ({}) charges of {} doesn't match existing charges of {}",
                     n, s->id(), s->charges(), cooldown->charges );
@@ -5645,6 +5531,9 @@ struct heart_of_the_wild_t : public druid_spell_t
     : druid_spell_t( "heart_of_the_wild", p, p->talent.heart_of_the_wild, options_str )
   {
     harmful = may_crit = may_miss = false;
+
+    reset_melee_swing = false;
+
     // Although the effect is coded as modify cooldown time (341) which takes a flat value in milliseconds, the actual
     // effect in-game works as a percent reduction.
     cooldown->duration *= 1.0 + p->conduit.born_of_the_wilds.percent();
@@ -5743,15 +5632,21 @@ struct ironfur_t : public druid_spell_t
 
 struct starfire_t : public druid_spell_t
 {
-  starfire_t( druid_t* player, util::string_view options_str )
-    : druid_spell_t( "starfire", player, player->find_affinity_spell( "Starfire" ), options_str )
+  starfire_t( druid_t* p, util::string_view opt )
+    : druid_spell_t( "starfire", p, p->find_affinity_spell( "Starfire" ), opt )
   {
     aoe = -1;
 
-    if ( player->specialization() == DRUID_BALANCE )
+    if ( p->specialization() == DRUID_BALANCE )
       base_aoe_multiplier = data().effectN( 3 ).percent();
     else
       base_aoe_multiplier = data().effectN( 2 ).percent();
+
+    if ( p->specialization() != DRUID_BALANCE )
+    {
+      form_mask = MOONKIN_FORM;  // not in spell data for affinity version (id=197630)
+      base_costs[ RESOURCE_MANA ] = 0.0;  // so we don't need to enable mana regen
+    }
   }
 
   void init_finished() override
@@ -5879,36 +5774,6 @@ struct sunfire_t : public druid_spell_t
 
     damage->target = execute_state->target;
     damage->schedule_execute();
-  }
-};
-
-// Moonkin Form Spell =======================================================
-
-struct moonkin_form_t : public druid_spell_t
-{
-  moonkin_form_t( druid_t* player, util::string_view options_str )
-    : druid_spell_t( "moonkin_form", player, player->spec.moonkin_form, options_str )
-  {
-    form_mask       = NO_FORM | CAT_FORM | BEAR_FORM;
-    may_autounshift = false;
-
-    harmful               = false;
-    ignore_false_positive = true;
-  }
-
-  void execute() override
-  {
-    druid_spell_t::execute();
-
-    p()->shapeshift( MOONKIN_FORM );
-
-    if ( p()->legendary.oath_of_the_elder_druid->ok() && !p()->buff.oath_of_the_elder_druid->check() &&
-         p()->talent.balance_affinity->ok() )
-    {
-      p()->buff.oath_of_the_elder_druid->trigger();
-      p()->buff.heart_of_the_wild->trigger(
-          timespan_t::from_seconds( p()->legendary.oath_of_the_elder_druid->effectN( 2 ).base_value() ) );
-    }
   }
 };
 
@@ -6062,7 +5927,15 @@ struct wrath_t : public druid_spell_t
   {
     druid_spell_t::execute();
 
-    if ( !free_cast )
+    if ( !free_cast && ( p()->specialization() == DRUID_BALANCE || p()->specialization() == DRUID_RESTORATION ) )
+      p()->eclipse_handler.cast_wrath();
+  }
+
+  void impact( action_state_t* s ) override
+  {
+    druid_spell_t::impact( s );
+
+    if ( !free_cast && ( p()->specialization() == DRUID_FERAL || p()->specialization() == DRUID_GUARDIAN ) )
       p()->eclipse_handler.cast_wrath();
   }
 };
@@ -6214,18 +6087,19 @@ struct starsurge_t : public druid_spell_t
     if ( p->legendary.oneths_clear_vision->ok() )
       p->active.oneths_clear_vision->stats->add_child( init_free_cast_stats( free_cast_e::ONETHS ) );
 
-    // use an explictly defined cooldown since with convoke it's possible to execute multiple versions of starsurge_t
-    if ( s->cooldown() > 0_ms )
-    {
-      cooldown = p->get_cooldown( "starsurge_affinity" );
-      cooldown->duration = s->cooldown();
-    }
-
+    // special handling for affinity version
     if ( p->talent.balance_affinity->ok() )
     {
-      form_mask = MOONKIN_FORM;
-    }
+      // use an explictly defined cooldown since with convoke it's possible to execute multiple versions of starsurge_t
+      if ( s->cooldown() > 0_ms )
+      {
+        cooldown = p->get_cooldown( "starsurge_affinity" );
+        cooldown->duration = s->cooldown();
+      }
 
+      form_mask = MOONKIN_FORM;           // not in spell data for affinity version (id=197626)
+      base_costs[ RESOURCE_MANA ] = 0.0;  // so we don't need to enable mana regen
+    }
   }
 
   void init() override
@@ -8407,10 +8281,12 @@ std::string druid_t::default_potion() const
     case DRUID_RESTORATION:
       if      ( true_level >= 60 ) return "spectral_intellect";
       else if ( true_level >= 40 ) return "superior_battle_potion_of_intellect";
+      SC_FALLTHROUGH;
     case DRUID_FERAL:
     case DRUID_GUARDIAN:
       if      ( true_level >= 60 ) return "spectral_agility";
       else if ( true_level >= 40 ) return "superior_battle_potion_of_agility";
+      SC_FALLTHROUGH;
     default:
       return "disabled";
   }
@@ -8441,6 +8317,7 @@ std::string druid_t::default_temporary_enchant() const
     case DRUID_GUARDIAN:
     case DRUID_FERAL:
       if ( true_level >= 60 ) return "main_hand:shadowcore_oil";
+      SC_FALLTHROUGH;
     default:
       return "disabled";
   }
@@ -8523,9 +8400,12 @@ void druid_t::apl_balance()
   def->add_action( "berserking,if=(!covenant.night_fae|!cooldown.convoke_the_spirits.up)&buff.ca_inc.up" );
   def->add_action( "potion,if=buff.ca_inc.up" );
   def->add_action( "variable,name=convoke_desync,value=floor((interpolated_fight_remains-20-cooldown.convoke_the_spirits.remains)%120)>floor((interpolated_fight_remains-25-(10*talent.incarnation.enabled)-(conduit.precise_alignment.time_value)-cooldown.ca_inc.remains)%180)|cooldown.ca_inc.remains>interpolated_fight_remains|cooldown.convoke_the_spirits.remains>interpolated_fight_remains|!covenant.night_fae" );
+  def->add_action( "variable,name=cd_condition,value=(!equipped.empyreal_ordnance|cooldown.empyreal_ordnance.remains<160&!cooldown.empyreal_ordnance.ready)|covenant.kyrian" );
+  def->add_action( "use_item,name=empyreal_ordnance,if=cooldown.ca_inc.remains<20&variable.convoke_desync|cooldown.convoke_the_spirits.remains<20" );
+  def->add_action( "use_item,name=soulletting_ruby,if=cooldown.ca_inc.remains<6&variable.convoke_desync|cooldown.convoke_the_spirits.remains<6" );
   def->add_action( "use_item,name=inscrutable_quantum_device,if=buff.ca_inc.up" );
-  def->add_action( "use_items,slots=trinket1,if=!trinket.1.has_proc.any&(!trinket.2.has_proc.any|!trinket.2.ready_cooldown)|buff.ca_inc.up|cooldown.ca_inc.remains-10>trinket.1.cooldown.duration&!covenant.kyrian|covenant.night_fae&variable.convoke_desync&cooldown.convoke_the_spirits.up&!cooldown.ca_inc.up&((buff.eclipse_lunar.remains>10|buff.eclipse_solar.remains>10)&!runeforge.balance_of_all_things|runeforge.balance_of_all_things&(buff.balance_of_all_things_nature.stack_value>30|buff.balance_of_all_things_arcane.stack_value>30))|buff.kindred_empowerment_energize.up|fight_remains<20" );
-  def->add_action( "use_items,slots=trinket2,if=!trinket.2.has_proc.any&(!trinket.1.has_proc.any|!trinket.1.ready_cooldown)|trinket.1.has_proc.any&trinket.2.has_proc.any&!trinket.1.ready_cooldown|buff.ca_inc.up|cooldown.ca_inc.remains-10>trinket.2.cooldown.duration&!covenant.kyrian|covenant.night_fae&variable.convoke_desync&cooldown.convoke_the_spirits.up&!cooldown.ca_inc.up&((buff.eclipse_lunar.remains>10|buff.eclipse_solar.remains>10)&!runeforge.balance_of_all_things|runeforge.balance_of_all_things&(buff.balance_of_all_things_nature.stack_value>30|buff.balance_of_all_things_arcane.stack_value>30))|buff.kindred_empowerment_energize.up|fight_remains<20" );
+  def->add_action( "use_items,slots=trinket1,if=!trinket.1.has_proc.any&(!trinket.2.has_proc.any|!trinket.2.ready_cooldown|!trinket.2.cooldown.duration)|(!trinket.1.has_proc.any&!trinket.2.has_proc.any&!trinket.2.cooldown.duration|trinket.1.has_proc.any)&(buff.ca_inc.up|cooldown.ca_inc.remains-10>trinket.1.cooldown.duration&!covenant.kyrian|covenant.night_fae&variable.convoke_desync&cooldown.convoke_the_spirits.up&!cooldown.ca_inc.up&((buff.eclipse_lunar.remains>10|buff.eclipse_solar.remains>10)&!runeforge.balance_of_all_things|runeforge.balance_of_all_things&(buff.balance_of_all_things_nature.stack>3|buff.balance_of_all_things_arcane.stack>3))|buff.kindred_empowerment_energize.up)|fight_remains<20" );
+  def->add_action( "use_items,slots=trinket2,if=!trinket.2.has_proc.any&(!trinket.1.has_proc.any|!trinket.1.ready_cooldown|!trinket.1.cooldown.duration)|trinket.1.has_proc.any&trinket.2.has_proc.any&!trinket.1.ready_cooldown|buff.ca_inc.up|cooldown.ca_inc.remains-10>trinket.2.cooldown.duration&!covenant.kyrian|covenant.night_fae&variable.convoke_desync&cooldown.convoke_the_spirits.up&!cooldown.ca_inc.up&((buff.eclipse_lunar.remains>10|buff.eclipse_solar.remains>10)&!runeforge.balance_of_all_things|runeforge.balance_of_all_things&(buff.balance_of_all_things_nature.stack>3|buff.balance_of_all_things_arcane.stack>3))|buff.kindred_empowerment_energize.up|fight_remains<20" );
   def->add_action( "use_items" );
   def->add_action( "run_action_list,name=aoe,if=variable.is_aoe" );
   def->add_action( "run_action_list,name=dreambinder,if=runeforge.timeworn_dreambinder.equipped" );
@@ -8533,7 +8413,7 @@ void druid_t::apl_balance()
   def->add_action( "run_action_list,name=st" );
 
   st->add_action( "adaptive_swarm,target_if=!dot.adaptive_swarm_damage.ticking&!action.adaptive_swarm_damage.in_flight&(!dot.adaptive_swarm_heal.ticking|dot.adaptive_swarm_heal.remains>5)|dot.adaptive_swarm_damage.stack<3&dot.adaptive_swarm_damage.remains<3&dot.adaptive_swarm_damage.ticking" );
-  st->add_action( "convoke_the_spirits,if=(variable.convoke_desync&!cooldown.ca_inc.ready|buff.ca_inc.up)&astral_power<40&(buff.eclipse_lunar.remains>10|buff.eclipse_solar.remains>10)|fight_remains<10" );
+  st->add_action( "convoke_the_spirits,if=!druid.no_cds&((variable.convoke_desync&!cooldown.ca_inc.ready|buff.ca_inc.up)&astral_power<40&(buff.eclipse_lunar.remains>10|buff.eclipse_solar.remains>10)|fight_remains<10)" );
   st->add_action( "variable,name=dot_requirements,value=(buff.ca_inc.remains>5&(buff.ravenous_frenzy.remains>5|!buff.ravenous_frenzy.up)|!buff.ca_inc.up|astral_power<30)&(!buff.kindred_empowerment_energize.up|astral_power<30)&(buff.eclipse_solar.remains>gcd.max|buff.eclipse_lunar.remains>gcd.max)" );
   st->add_action( "moonfire,target_if=refreshable&target.time_to_die>12,if=ap_check&variable.dot_requirements" );
   st->add_action( "sunfire,target_if=refreshable&target.time_to_die>12,if=ap_check&variable.dot_requirements" );
@@ -8541,13 +8421,13 @@ void druid_t::apl_balance()
   st->add_action( "force_of_nature,if=ap_check" );
   st->add_action( "ravenous_frenzy,if=buff.ca_inc.up" );
   st->add_action( "kindred_spirits,if=((buff.eclipse_solar.remains>10|buff.eclipse_lunar.remains>10)&cooldown.ca_inc.remains>30&(buff.primordial_arcanic_pulsar.value<240|!runeforge.primordial_arcanic_pulsar.equipped))|buff.primordial_arcanic_pulsar.value>=270|cooldown.ca_inc.ready&(astral_power>90|variable.is_aoe)" );
-  st->add_action( "celestial_alignment,if=(astral_power>90&(buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|variable.is_aoe|buff.bloodlust.up&buff.bloodlust.remains<20+((9*runeforge.primordial_arcanic_pulsar.equipped)+(conduit.precise_alignment.time_value)))&!buff.ca_inc.up&(!covenant.night_fae|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<20+(conduit.precise_alignment.time_value))" );
-  st->add_action( "incarnation,if=(astral_power>90&(buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|variable.is_aoe|buff.bloodlust.up&buff.bloodlust.remains<30+((9*runeforge.primordial_arcanic_pulsar.equipped)+(conduit.precise_alignment.time_value)))&!buff.ca_inc.up&(!covenant.night_fae|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<30+(conduit.precise_alignment.time_value))" );
-  st->add_action( "variable,name=save_for_ca_inc,value=(!cooldown.ca_inc.ready|!variable.convoke_desync&covenant.night_fae)" );
+  st->add_action( "celestial_alignment,if=!druid.no_cds&variable.cd_condition&(astral_power>90&(buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|variable.is_aoe|buff.bloodlust.up&buff.bloodlust.remains<20+((9*runeforge.primordial_arcanic_pulsar.equipped)+(conduit.precise_alignment.time_value)))&!buff.ca_inc.up&(!covenant.night_fae|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<20+(conduit.precise_alignment.time_value))" );
+  st->add_action( "incarnation,if=!druid.no_cds&variable.cd_condition&(astral_power>90&(buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|variable.is_aoe|buff.bloodlust.up&buff.bloodlust.remains<30+((9*runeforge.primordial_arcanic_pulsar.equipped)+(conduit.precise_alignment.time_value)))&!buff.ca_inc.up&(!covenant.night_fae|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<30+(conduit.precise_alignment.time_value))" );
+  st->add_action( "variable,name=save_for_ca_inc,value=!cooldown.ca_inc.ready|!variable.convoke_desync&covenant.night_fae|druid.no_cds" );
   st->add_action( "fury_of_elune,if=eclipse.in_any&ap_check&buff.primordial_arcanic_pulsar.value<240&(dot.adaptive_swarm_damage.ticking|!covenant.necrolord)&variable.save_for_ca_inc" );
   st->add_action( "starfall,if=buff.oneths_perception.up&buff.starfall.refreshable" );
   st->add_action( "cancel_buff,name=starlord,if=buff.starlord.remains<5&(buff.eclipse_solar.remains>5|buff.eclipse_lunar.remains>5)&astral_power>90" );
-  st->add_action( "starsurge,if=covenant.night_fae&variable.convoke_desync&cooldown.convoke_the_spirits.remains<5" );
+  st->add_action( "starsurge,if=covenant.night_fae&variable.convoke_desync&cooldown.convoke_the_spirits.remains<5&!druid.no_cds" );
   st->add_action( "starfall,if=talent.stellar_drift.enabled&!talent.starlord.enabled&buff.starfall.refreshable&(buff.eclipse_lunar.remains>6&eclipse.in_lunar&buff.primordial_arcanic_pulsar.value<250|buff.primordial_arcanic_pulsar.value>=250&astral_power>90|dot.adaptive_swarm_damage.remains>8|action.adaptive_swarm_damage.in_flight)&!cooldown.ca_inc.ready" );
   st->add_action( "starsurge,if=buff.oneths_clear_vision.up|buff.kindred_empowerment_energize.up|buff.ca_inc.up&(buff.ravenous_frenzy.remains<gcd.max*ceil(astral_power%30)&buff.ravenous_frenzy.up|!buff.ravenous_frenzy.up&!cooldown.ravenous_frenzy.ready|!covenant.venthyr)|astral_power>90&eclipse.in_any" );
   st->add_action( "starsurge,if=talent.starlord.enabled&(buff.starlord.up|astral_power>90)&buff.starlord.stack<3&(buff.eclipse_solar.up|buff.eclipse_lunar.up)&buff.primordial_arcanic_pulsar.value<270&(cooldown.ca_inc.remains>10|!variable.convoke_desync&covenant.night_fae)" );
@@ -8561,37 +8441,38 @@ void druid_t::apl_balance()
   st->add_action( "run_action_list,name=fallthru" );
 
   aoe->add_action( "variable,name=dream_will_fall_off,value=(buff.timeworn_dreambinder.remains<gcd.max+0.1|buff.timeworn_dreambinder.remains<action.starfire.execute_time+0.1&(eclipse.in_lunar|eclipse.solar_next|eclipse.any_next))&buff.timeworn_dreambinder.up&runeforge.timeworn_dreambinder.equipped" );
-  aoe->add_action( "convoke_the_spirits,if=(variable.convoke_desync&!cooldown.ca_inc.ready|buff.ca_inc.up)&astral_power<50&(buff.eclipse_lunar.remains>6|buff.eclipse_solar.remains>6)&(!runeforge.balance_of_all_things|buff.balance_of_all_things_nature.stack_value>30|buff.balance_of_all_things_arcane.stack_value>30)|fight_remains<10" );
-  aoe->add_action( "starfall,if=buff.starfall.refreshable&(spell_targets.starfall<3|!runeforge.timeworn_dreambinder.equipped)&(!runeforge.lycaras_fleeting_glimpse.equipped|time%%45>buff.starfall.remains+2)" );
+  aoe->add_action( "variable,name=ignore_starsurge,value=buff.eclipse_lunar.up&(spell_targets.starfire>4&talent.soul_of_the_forest.enabled|spell_targets.starfire>6)" );
+  aoe->add_action( "convoke_the_spirits,if=!druid.no_cds&((variable.convoke_desync&!cooldown.ca_inc.ready|buff.ca_inc.up)&(astral_power<50|variable.ignore_starsurge)&(buff.eclipse_lunar.remains>6|buff.eclipse_solar.remains>6)&(!runeforge.balance_of_all_things|buff.balance_of_all_things_nature.stack>3|buff.balance_of_all_things_arcane.stack>3)|fight_remains<10)" );
+  aoe->add_action( "sunfire,target_if=refreshable&target.time_to_die>14-spell_targets+remains&(eclipse.in_any|remains<gcd.max),if=" );
+  aoe->add_action( "starfall,if=buff.starfall.refreshable&(spell_targets.starfall<3|!runeforge.timeworn_dreambinder.equipped)&(!runeforge.lycaras_fleeting_glimpse.equipped|time%%45>buff.starfall.remains+2)&target.time_to_die>5" );
   aoe->add_action( "starfall,if=runeforge.timeworn_dreambinder.equipped&spell_targets.starfall>=3&(!buff.timeworn_dreambinder.up&buff.starfall.refreshable|(variable.dream_will_fall_off&(buff.starfall.remains<3|spell_targets.starfall>2&talent.stellar_drift.enabled&buff.starfall.remains<5)))" );
   aoe->add_action( "variable,name=starfall_wont_fall_off,value=astral_power>80-(10*buff.timeworn_dreambinder.stack)-(buff.starfall.remains*3%spell_haste)-(dot.fury_of_elune.remains*5)&buff.starfall.up" );
-  aoe->add_action( "starsurge,if=variable.dream_will_fall_off&variable.starfall_wont_fall_off|(buff.balance_of_all_things_nature.stack_value>30|buff.balance_of_all_things_arcane.stack_value>30)&spell_targets.starfall<4" );
-  aoe->add_action( "sunfire,target_if=refreshable&target.time_to_die>14-spell_targets+remains,if=ap_check&eclipse.in_any" );
+  aoe->add_action( "starsurge,if=variable.dream_will_fall_off&variable.starfall_wont_fall_off&!variable.ignore_starsurge|(buff.balance_of_all_things_nature.stack>3|buff.balance_of_all_things_arcane.stack>3)&spell_targets.starfall<4" );
   aoe->add_action( "adaptive_swarm,target_if=!ticking&!action.adaptive_swarm_damage.in_flight|dot.adaptive_swarm_damage.stack<3&dot.adaptive_swarm_damage.remains<3" );
-  aoe->add_action( "moonfire,target_if=refreshable&target.time_to_die>(14+(spell_targets.starfire*1.5))%spell_targets+remains,if=(cooldown.ca_inc.ready&(variable.convoke_desync|cooldown.convoke_the_spirits.ready|!covenant.night_fae)|spell_targets.starfire<(4*(1+talent.twin_moons.enabled))|(eclipse.in_solar|(eclipse.in_both|eclipse.in_lunar)&!talent.soul_of_the_forest.enabled|buff.primordial_arcanic_pulsar.value>=250)&(spell_targets.starfire<10*(1+talent.twin_moons.enabled))&astral_power>50-buff.starfall.remains*6)&(!buff.kindred_empowerment_energize.up|eclipse.in_solar|!covenant.kyrian)&ap_check" );
+  aoe->add_action( "moonfire,target_if=refreshable&target.time_to_die>(14+(spell_targets.starfire*1.5))%spell_targets+remains,if=(cooldown.ca_inc.ready&!druid.no_cds&(variable.convoke_desync|cooldown.convoke_the_spirits.ready|!covenant.night_fae)|spell_targets.starfire<(5*(1+talent.twin_moons.enabled))|(eclipse.in_solar|(eclipse.in_both|eclipse.in_lunar)&!talent.soul_of_the_forest.enabled|buff.primordial_arcanic_pulsar.value>=250)&(spell_targets.starfire<10*(1+talent.twin_moons.enabled))&astral_power>50-buff.starfall.remains*6)&(!buff.kindred_empowerment_energize.up|eclipse.in_solar|!covenant.kyrian)&ap_check" );
   aoe->add_action( "force_of_nature,if=ap_check" );
   aoe->add_action( "ravenous_frenzy,if=buff.ca_inc.up" );
-  aoe->add_action( "celestial_alignment,if=(buff.starfall.up|astral_power>50)&!buff.solstice.up&!buff.ca_inc.up&(!covenant.night_fae|variable.convoke_desync|cooldown.convoke_the_spirits.up|interpolated_fight_remains<20+(conduit.precise_alignment.time_value))" );
-  aoe->add_action( "incarnation,if=(buff.starfall.up|astral_power>50)&!buff.solstice.up&!buff.ca_inc.up&(!covenant.night_fae|variable.convoke_desync|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<30+(conduit.precise_alignment.time_value))" );
-  aoe->add_action( "kindred_spirits,if=interpolated_fight_remains<15|(buff.primordial_arcanic_pulsar.value<250|buff.primordial_arcanic_pulsar.value>=250)&buff.starfall.up&cooldown.ca_inc.remains>50" );
+  aoe->add_action( "celestial_alignment,if=!druid.no_cds&variable.cd_condition&(buff.starfall.up|astral_power>50)&!buff.solstice.up&!buff.ca_inc.up&(!covenant.night_fae|variable.convoke_desync|cooldown.convoke_the_spirits.up|interpolated_fight_remains<20+(conduit.precise_alignment.time_value))" );
+  aoe->add_action( "incarnation,if=!druid.no_cds&variable.cd_condition&(buff.starfall.up|astral_power>50)&!buff.solstice.up&!buff.ca_inc.up&(!covenant.night_fae|variable.convoke_desync|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<30+(conduit.precise_alignment.time_value))" );
+  aoe->add_action( "kindred_spirits,if=interpolated_fight_remains<15|(buff.primordial_arcanic_pulsar.value<250|buff.primordial_arcanic_pulsar.value>=250)&buff.starfall.up&(cooldown.ca_inc.remains>50|druid.no_cds)" );
   aoe->add_action( "stellar_flare,target_if=refreshable&time_to_die>15,if=spell_targets.starfire<4&ap_check&(buff.ca_inc.remains>10|!buff.ca_inc.up)" );
   aoe->add_action( "fury_of_elune,if=eclipse.in_any&ap_check&buff.primordial_arcanic_pulsar.value<250&(dot.adaptive_swarm_damage.ticking|!covenant.necrolord|spell_targets>2)" );
   aoe->add_action( "starfall,if=buff.oneths_perception.up&(buff.starfall.refreshable|astral_power>90)" );
-  aoe->add_action( "starfall,if=covenant.night_fae&(variable.convoke_desync|cooldown.ca_inc.up|buff.ca_inc.up)&cooldown.convoke_the_spirits.remains<gcd.max*ceil(astral_power%50)&buff.starfall.remains<4" );
-  aoe->add_action( "starsurge,if=covenant.night_fae&(variable.convoke_desync|cooldown.ca_inc.up|buff.ca_inc.up)&cooldown.convoke_the_spirits.remains<6&buff.starfall.up&eclipse.in_any" );
+  aoe->add_action( "starfall,if=covenant.night_fae&(variable.convoke_desync|cooldown.ca_inc.up|buff.ca_inc.up)&cooldown.convoke_the_spirits.remains<gcd.max*ceil(astral_power%50)&buff.starfall.remains<4&!druid.no_cds" );
+  aoe->add_action( "starsurge,if=covenant.night_fae&(variable.convoke_desync|cooldown.ca_inc.up|buff.ca_inc.up)&cooldown.convoke_the_spirits.remains<6&buff.starfall.up&eclipse.in_any&!variable.ignore_starsurge&!druid.no_cds" );
   aoe->add_action( "starsurge,if=buff.oneths_clear_vision.up|(!starfire.ap_check|(buff.ca_inc.remains<5&buff.ca_inc.up|(buff.ravenous_frenzy.remains<gcd.max*ceil(astral_power%30)&buff.ravenous_frenzy.up))&variable.starfall_wont_fall_off&spell_targets.starfall<3)&(!runeforge.timeworn_dreambinder.equipped|spell_targets.starfall<3)" );
   aoe->add_action( "new_moon,if=(eclipse.in_any&cooldown.ca_inc.remains>50|(charges=2&recharge_time<5)|charges=3)&ap_check" );
   aoe->add_action( "half_moon,if=(eclipse.in_any&cooldown.ca_inc.remains>50|(charges=2&recharge_time<5)|charges=3)&ap_check" );
   aoe->add_action( "full_moon,if=(eclipse.in_any&cooldown.ca_inc.remains>50|(charges=2&recharge_time<5)|charges=3)&ap_check" );
   aoe->add_action( "warrior_of_elune" );
-  aoe->add_action( "variable,name=starfire_in_solar,value=spell_targets.starfire>4+floor(mastery_value%20)+floor(buff.starsurge_empowerment_solar.stack%4)" );
+  aoe->add_action( "variable,name=starfire_in_solar,value=spell_targets.starfire>4+floor(mastery_value*100%20)+floor(buff.starsurge_empowerment_solar.stack%4)" );
   aoe->add_action( "wrath,if=eclipse.lunar_next|eclipse.any_next&variable.is_cleave|buff.eclipse_solar.remains<action.starfire.execute_time&buff.eclipse_solar.up|eclipse.in_solar&!variable.starfire_in_solar|buff.ca_inc.remains<action.starfire.execute_time&!variable.is_cleave&buff.ca_inc.remains<execute_time&buff.ca_inc.up|buff.ravenous_frenzy.up&spell_haste>0.6&(spell_targets<=3|!talent.soul_of_the_forest.enabled)|!variable.is_cleave&buff.ca_inc.remains>execute_time" );
   aoe->add_action( "starfire" );
   aoe->add_action( "run_action_list,name=fallthru" );
 
   dreambinder->add_action( "variable,name=safe_to_use_spell,value=(buff.timeworn_dreambinder.remains>gcd.max+0.1&(eclipse.in_both|eclipse.in_solar|eclipse.lunar_next)|buff.timeworn_dreambinder.remains>action.starfire.execute_time+0.1&(eclipse.in_lunar|eclipse.solar_next|eclipse.any_next))|!buff.timeworn_dreambinder.up" );
   dreambinder->add_action( "starsurge,if=(!variable.safe_to_use_spell|(buff.ravenous_frenzy.remains<gcd.max*ceil(astral_power%30)&buff.ravenous_frenzy.up))|astral_power>90" );
-  dreambinder->add_action( "convoke_the_spirits,if=(variable.convoke_desync&interpolated_fight_remains>130&!cooldown.ca_inc.ready|buff.ca_inc.up)&astral_power<40&(buff.eclipse_lunar.remains>10|buff.eclipse_solar.remains>10)|fight_remains<10" );
+  dreambinder->add_action( "convoke_the_spirits,if=!druid.no_cds&((variable.convoke_desync&interpolated_fight_remains>130&!cooldown.ca_inc.ready|buff.ca_inc.up)&astral_power<40&(buff.eclipse_lunar.remains>10|buff.eclipse_solar.remains>10)|fight_remains<10)" );
   dreambinder->add_action( "adaptive_swarm,target_if=!dot.adaptive_swarm_damage.ticking&!action.adaptive_swarm_damage.in_flight&(!dot.adaptive_swarm_heal.ticking|dot.adaptive_swarm_heal.remains>5)|dot.adaptive_swarm_damage.stack<3&dot.adaptive_swarm_damage.remains<3&dot.adaptive_swarm_damage.ticking" );
   dreambinder->add_action( "moonfire,target_if=refreshable&target.time_to_die>12,if=(buff.ca_inc.remains>5&(buff.ravenous_frenzy.remains>5|!buff.ravenous_frenzy.up)|!buff.ca_inc.up|astral_power<30)&(!buff.kindred_empowerment_energize.up|astral_power<30)&ap_check" );
   dreambinder->add_action( "sunfire,target_if=refreshable&target.time_to_die>12,if=(buff.ca_inc.remains>5&(buff.ravenous_frenzy.remains>5|!buff.ravenous_frenzy.up)|!buff.ca_inc.up|astral_power<30)&(!buff.kindred_empowerment_energize.up|astral_power<30)&ap_check" );
@@ -8599,11 +8480,11 @@ void druid_t::apl_balance()
   dreambinder->add_action( "force_of_nature,if=ap_check" );
   dreambinder->add_action( "ravenous_frenzy,if=buff.ca_inc.up" );
   dreambinder->add_action( "kindred_spirits,if=((buff.eclipse_solar.remains>10|buff.eclipse_lunar.remains>10)&cooldown.ca_inc.remains>30)|cooldown.ca_inc.ready" );
-  dreambinder->add_action( "celestial_alignment,if=((buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|variable.is_aoe|buff.bloodlust.up&buff.bloodlust.remains<20+(conduit.precise_alignment.time_value))&!buff.ca_inc.up&(!covenant.night_fae|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<20+(conduit.precise_alignment.time_value))" );
-  dreambinder->add_action( "incarnation,if=((buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|variable.is_aoe|buff.bloodlust.up&buff.bloodlust.remains<30+(conduit.precise_alignment.time_value))&!buff.ca_inc.up&(!covenant.night_fae|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<30+(conduit.precise_alignment.time_value))" );
-  dreambinder->add_action( "variable,name=save_for_ca_inc,value=(!cooldown.ca_inc.ready|!variable.convoke_desync&covenant.night_fae)" );
+  dreambinder->add_action( "celestial_alignment,if=!druid.no_cds&variable.cd_condition&((buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|variable.is_aoe|buff.bloodlust.up&buff.bloodlust.remains<20+(conduit.precise_alignment.time_value))&!buff.ca_inc.up&(!covenant.night_fae|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<20+(conduit.precise_alignment.time_value))" );
+  dreambinder->add_action( "incarnation,if=!druid.no_cds&variable.cd_condition&((buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|variable.is_aoe|buff.bloodlust.up&buff.bloodlust.remains<30+(conduit.precise_alignment.time_value))&!buff.ca_inc.up&(!covenant.night_fae|cooldown.convoke_the_spirits.up|interpolated_fight_remains<cooldown.convoke_the_spirits.remains+6|interpolated_fight_remains%%180<30+(conduit.precise_alignment.time_value))" );
+  dreambinder->add_action( "variable,name=save_for_ca_inc,value=!cooldown.ca_inc.ready|!variable.convoke_desync&covenant.night_fae|druid.no_cds" );
   dreambinder->add_action( "fury_of_elune,if=eclipse.in_any&ap_check&(dot.adaptive_swarm_damage.ticking|!covenant.necrolord)&variable.save_for_ca_inc" );
-  dreambinder->add_action( "starsurge,if=covenant.night_fae&variable.convoke_desync&astral_power>=40&cooldown.convoke_the_spirits.remains<gcd.max*ceil(astral_power%30)" );
+  dreambinder->add_action( "starsurge,if=covenant.night_fae&variable.convoke_desync&astral_power>=40&cooldown.convoke_the_spirits.remains<gcd.max*ceil(astral_power%30)&!druid.no_cds" );
   dreambinder->add_action( "new_moon,if=(buff.eclipse_lunar.up|(charges=2&recharge_time<5)|charges=3)&ap_check&variable.save_for_ca_inc" );
   dreambinder->add_action( "half_moon,if=(buff.eclipse_lunar.up&!covenant.kyrian|(buff.kindred_empowerment_energize.up&covenant.kyrian)|(charges=2&recharge_time<5)|charges=3|buff.ca_inc.up)&ap_check&variable.save_for_ca_inc" );
   dreambinder->add_action( "full_moon,if=(buff.eclipse_lunar.up&!covenant.kyrian|(buff.kindred_empowerment_energize.up&covenant.kyrian)|(charges=2&recharge_time<5)|charges=3|buff.ca_inc.up)&ap_check&variable.save_for_ca_inc" );
@@ -8614,21 +8495,22 @@ void druid_t::apl_balance()
 
   boat->add_action( "ravenous_frenzy,if=buff.ca_inc.up" );
   boat->add_action( "variable,name=critnotup,value=!buff.balance_of_all_things_nature.up&!buff.balance_of_all_things_arcane.up" );
-  boat->add_action( "adaptive_swarm,target_if=buff.balance_of_all_things_nature.stack_value<40&buff.balance_of_all_things_arcane.stack_value<40&(!dot.adaptive_swarm_damage.ticking&!action.adaptive_swarm_damage.in_flight&(!dot.adaptive_swarm_heal.ticking|dot.adaptive_swarm_heal.remains>3)|dot.adaptive_swarm_damage.stack<3&dot.adaptive_swarm_damage.remains<5&dot.adaptive_swarm_damage.ticking)" );
-  boat->add_action( "convoke_the_spirits,if=(variable.convoke_desync&!cooldown.ca_inc.ready|buff.ca_inc.up)&(buff.balance_of_all_things_nature.stack_value=50|buff.balance_of_all_things_arcane.stack_value=50)|fight_remains<10" );
-  boat->add_action( "cancel_buff,name=starlord,if=(buff.balance_of_all_things_nature.remains>4.5|buff.balance_of_all_things_arcane.remains>4.5)&astral_power>=90&(cooldown.ca_inc.remains>7|(cooldown.empower_bond.remains>7&!buff.kindred_empowerment_energize.up&covenant.kyrian))" );
-  boat->add_action( "starsurge,if=!variable.critnotup&(covenant.night_fae|cooldown.ca_inc.remains>7|(cooldown.empower_bond.remains>7&!buff.kindred_empowerment_energize.up&covenant.kyrian))" );
-  boat->add_action( "starsurge,if=(cooldown.convoke_the_spirits.remains<5&(variable.convoke_desync|cooldown.ca_inc.remains<5))&astral_power>40&covenant.night_fae" );
-  boat->add_action( "sunfire,target_if=refreshable&target.time_to_die>16,if=ap_check&(variable.critnotup|(astral_power<30&!buff.ca_inc.up)|cooldown.ca_inc.ready)" );
-  boat->add_action( "moonfire,target_if=refreshable&target.time_to_die>13.5,if=ap_check&(variable.critnotup|(astral_power<30&!buff.ca_inc.up)|cooldown.ca_inc.ready)&!buff.kindred_empowerment_energize.up" );
-  boat->add_action( "stellar_flare,target_if=refreshable&target.time_to_die>16+remains,if=ap_check&(variable.critnotup|astral_power<30|cooldown.ca_inc.ready)" );
+  boat->add_action( "adaptive_swarm,target_if=buff.balance_of_all_things_nature.stack<4&buff.balance_of_all_things_arcane.stack<4&(!dot.adaptive_swarm_damage.ticking&!action.adaptive_swarm_damage.in_flight&(!dot.adaptive_swarm_heal.ticking|dot.adaptive_swarm_heal.remains>3)|dot.adaptive_swarm_damage.stack<3&dot.adaptive_swarm_damage.remains<5&dot.adaptive_swarm_damage.ticking)" );
+  boat->add_action( "convoke_the_spirits,if=!druid.no_cds&((variable.convoke_desync&!cooldown.ca_inc.ready|buff.ca_inc.up)&(buff.balance_of_all_things_nature.stack=5|buff.balance_of_all_things_arcane.stack=5)|fight_remains<10)" );
+  boat->add_action( "cancel_buff,name=starlord,if=(buff.balance_of_all_things_nature.remains>4.5|buff.balance_of_all_things_arcane.remains>4.5)&(cooldown.ca_inc.remains>7|(cooldown.empower_bond.remains>7&!buff.kindred_empowerment_energize.up&covenant.kyrian))" );
+  boat->add_action( "starsurge,if=!variable.critnotup&(covenant.night_fae|cooldown.ca_inc.remains>7|!variable.cd_condition&!covenant.kyrian|(cooldown.empower_bond.remains>7&!buff.kindred_empowerment_energize.up&covenant.kyrian))" );
+  boat->add_action( "starsurge,if=(cooldown.convoke_the_spirits.remains<5&!druid.no_cds&(variable.convoke_desync|cooldown.ca_inc.remains<5))&astral_power>40&covenant.night_fae&!druid.no_cds" );
+  boat->add_action( "variable,name=dot_requirements,value=(buff.ca_inc.remains>5&(buff.ravenous_frenzy.remains>5|!buff.ravenous_frenzy.up)|!buff.ca_inc.up|astral_power<30)&(!buff.kindred_empowerment_energize.up|astral_power<30)&(buff.eclipse_solar.remains>gcd.max|buff.eclipse_lunar.remains>gcd.max)" );
+  boat->add_action( "sunfire,target_if=refreshable&target.time_to_die>16,if=ap_check&variable.dot_requirements" );
+  boat->add_action( "moonfire,target_if=refreshable&target.time_to_die>13.5,if=ap_check&variable.dot_requirements" );
+  boat->add_action( "stellar_flare,target_if=refreshable&target.time_to_die>16+remains,if=ap_check&variable.dot_requirements" );
   boat->add_action( "force_of_nature,if=ap_check" );
-  boat->add_action( "fury_of_elune,if=(eclipse.in_any|eclipse.solar_in_1|eclipse.lunar_in_1)&(!covenant.night_fae|(astral_power<95&(variable.critnotup|astral_power<30|variable.is_aoe)&(variable.convoke_desync&!cooldown.convoke_the_spirits.up|!variable.convoke_desync&!cooldown.ca_inc.up)))&(cooldown.ca_inc.remains>30|astral_power>90&cooldown.ca_inc.up&(cooldown.empower_bond.remains<action.starfire.execute_time|!covenant.kyrian)|interpolated_fight_remains<10)&(dot.adaptive_swarm_damage.remains>4|!covenant.necrolord)" );
-  boat->add_action( "kindred_spirits,if=(eclipse.lunar_next|eclipse.solar_next|eclipse.any_next|buff.balance_of_all_things_nature.remains>4.5|buff.balance_of_all_things_arcane.remains>4.5|astral_power>90&cooldown.ca_inc.ready)&(cooldown.ca_inc.remains>30|cooldown.ca_inc.ready)|interpolated_fight_remains<10" );
-  boat->add_action( "celestial_alignment,if=(astral_power>90&(buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|buff.bloodlust.up&buff.bloodlust.remains<20+(conduit.precise_alignment.time_value))&(variable.convoke_desync|cooldown.convoke_the_spirits.ready)|interpolated_fight_remains<20+(conduit.precise_alignment.time_value)" );
-  boat->add_action( "incarnation,if=(astral_power>90&(buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|buff.bloodlust.up&buff.bloodlust.remains<30+(conduit.precise_alignment.time_value))&(variable.convoke_desync|cooldown.convoke_the_spirits.ready)|interpolated_fight_remains<30+(conduit.precise_alignment.time_value)" );
+  boat->add_action( "fury_of_elune,if=(eclipse.in_any|eclipse.solar_in_1|eclipse.lunar_in_1)&(!covenant.night_fae|druid.no_cds|(astral_power<95&(variable.critnotup|astral_power<30|variable.is_aoe)&(variable.convoke_desync&!cooldown.convoke_the_spirits.up|!variable.convoke_desync&!cooldown.ca_inc.up)))&(cooldown.ca_inc.remains>30|druid.no_cds|astral_power>90&cooldown.ca_inc.up&(cooldown.empower_bond.remains<action.starfire.execute_time|!covenant.kyrian)|interpolated_fight_remains<10)&(dot.adaptive_swarm_damage.remains>4|!covenant.necrolord)" );
+  boat->add_action( "kindred_spirits,if=(eclipse.lunar_next|eclipse.solar_next|eclipse.any_next|buff.balance_of_all_things_nature.remains>4.5|buff.balance_of_all_things_arcane.remains>4.5|astral_power>90&cooldown.ca_inc.ready&!druid.no_cds)&(cooldown.ca_inc.remains>30|cooldown.ca_inc.ready)|interpolated_fight_remains<10" );
+  boat->add_action( "celestial_alignment,if=!druid.no_cds&variable.cd_condition&(astral_power>90&(buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|buff.bloodlust.up&buff.bloodlust.remains<20+(conduit.precise_alignment.time_value))&(variable.convoke_desync|cooldown.convoke_the_spirits.ready)|interpolated_fight_remains<20+(conduit.precise_alignment.time_value)" );
+  boat->add_action( "incarnation,if=!druid.no_cds&variable.cd_condition&(astral_power>90&(buff.kindred_empowerment_energize.up|!covenant.kyrian)|covenant.night_fae|buff.bloodlust.up&buff.bloodlust.remains<30+(conduit.precise_alignment.time_value))&(variable.convoke_desync|cooldown.convoke_the_spirits.ready)|interpolated_fight_remains<30+(conduit.precise_alignment.time_value)" );
   boat->add_action( "variable,name=aspPerSec,value=eclipse.in_lunar*8%action.starfire.execute_time+!eclipse.in_lunar*6%action.wrath.execute_time+0.2%spell_haste" );
-  boat->add_action( "starsurge,if=(interpolated_fight_remains<4|(buff.ravenous_frenzy.remains<gcd.max*ceil(astral_power%30)&buff.ravenous_frenzy.up))|(astral_power+variable.aspPerSec*buff.eclipse_solar.remains+dot.fury_of_elune.ticks_remain*2.5>120|astral_power+variable.aspPerSec*buff.eclipse_lunar.remains+dot.fury_of_elune.ticks_remain*2.5>120)&eclipse.in_any&((!cooldown.ca_inc.up|covenant.kyrian&!cooldown.empower_bond.up)|covenant.night_fae)&(!covenant.venthyr|!buff.ca_inc.up|astral_power>90)|buff.ca_inc.remains>8&!buff.ravenous_frenzy.up" );
+  boat->add_action( "starsurge,if=(interpolated_fight_remains<4|(buff.ravenous_frenzy.remains<gcd.max*ceil(astral_power%30)&buff.ravenous_frenzy.up))|(astral_power+variable.aspPerSec*buff.eclipse_solar.remains+dot.fury_of_elune.ticks_remain*2.5>120|astral_power+variable.aspPerSec*buff.eclipse_lunar.remains+dot.fury_of_elune.ticks_remain*2.5>120)&eclipse.in_any&(!buff.ca_inc.up|!talent.starlord.enabled)&((!cooldown.ca_inc.up|covenant.kyrian&!cooldown.empower_bond.up)|covenant.night_fae)&(!covenant.venthyr|!buff.ca_inc.up|astral_power>90)|(talent.starlord.enabled&buff.ca_inc.up&(buff.starlord.stack<3|astral_power>90))|buff.ca_inc.remains>8&!buff.ravenous_frenzy.up&!talent.starlord.enabled" );
   boat->add_action( "new_moon,if=(buff.eclipse_lunar.up|(charges=2&recharge_time<5)|charges=3)&ap_check" );
   boat->add_action( "half_moon,if=(buff.eclipse_lunar.up|(charges=2&recharge_time<5)|charges=3)&ap_check" );
   boat->add_action( "full_moon,if=(buff.eclipse_lunar.up|(charges=2&recharge_time<5)|charges=3)&ap_check" );
@@ -9525,74 +9407,104 @@ double druid_t::composite_leech() const
   return l;
 }
 
+// druid_t::create_action_expression ========================================
+std::unique_ptr<expr_t> druid_t::create_action_expression(action_t& a, util::string_view name_str)
+{
+  auto splits = util::string_split(name_str, ".");
+
+  if (splits[0] == "ticks_gained_on_refresh" || splits.size() > 2 && (splits[0] == "druid" || splits[0] == "dot" ) && splits[2] == "ticks_gained_on_refresh")
+  {
+    bool pmul = false;
+    if (splits.size() > 1 && splits[1] == "pmult" || splits.size() > 4 && splits[3] == "pmult")
+      pmul = true;
+
+    action_t* dot_action = nullptr;
+
+    if (splits.size() > 2)
+    {
+      if (splits[1] == "moonfire_cat")
+	dot_action = find_action("lunar_inspiration");
+      else if (splits[1] == "rake")
+	dot_action = find_action("rake_bleed");
+      else
+	dot_action = find_action(splits[1]);
+
+      if (!dot_action) throw std::invalid_argument("invalid action specified in ticks_gained_on_refresh");
+    }
+    else
+      dot_action = &a;
+
+    action_t * source_action = &a;
+    double multiplier = 1.0;
+
+    if (dot_action->name_str == "primal_wrath")
+    {
+      dot_action = find_action("rip");
+      source_action = find_action("primal_wrath");
+      multiplier = 0.5;
+    }
+
+    if (dot_action->name_str == "thrash_cat")
+    {
+      source_action = find_action("thrash_cat");
+    }
+
+    return make_fn_expr("name_str", [dot_action, source_action, multiplier, pmul]() -> double {
+
+      auto ticks_gained_func = [](double mod, action_t * dot_action, player_t * target, bool pmul) -> double {
+
+	action_state_t* state = dot_action->get_state();
+	state->target = target;
+	dot_action->snapshot_state(state, result_amount_type::DMG_OVER_TIME);
+
+	dot_t* dot = dot_action->get_dot(target);
+	timespan_t ttd = target->time_to_percent(0);
+	timespan_t duration = dot_action->composite_dot_duration(state) * mod;
+	timespan_t tick_time = dot_action->tick_time(state);
+
+	double remaining_ticks = std::min(dot->remains(), ttd) / dot_action->tick_time(state) * ((pmul && dot->state) ? dot->state->persistent_multiplier : 1.0);
+	double new_ticks = std::min(dot_action->calculate_dot_refresh_duration(dot, duration), ttd) / dot_action->tick_time(state) * (pmul ? state->persistent_multiplier : 1.0);
+
+	action_state_t::release(state);
+	return new_ticks - remaining_ticks;
+
+      };
+
+      if (source_action->aoe == -1)
+      {
+	double accum = 0.0;
+	for (player_t* target : source_action->targets_in_range_list(source_action->target_list()))
+	  accum += ticks_gained_func(multiplier, dot_action, target, pmul);
+
+	return accum;
+      }
+
+      return ticks_gained_func(multiplier, dot_action, source_action->target, pmul);
+
+    });
+
+  }
+
+  return player_t::create_action_expression(a, name_str);
+}
+
 // druid_t::create_expression ===============================================
 
 std::unique_ptr<expr_t> druid_t::create_expression( util::string_view name_str )
 {
   auto splits = util::string_split<util::string_view>( name_str, "." );
 
-  if ( util::str_compare_ci( splits[ 0 ], "druid" ) && splits.size() > 1 )
+  if ( util::str_compare_ci( splits[0], "druid" ) && splits.size() > 1 )
   {
-    if ( util::str_compare_ci( splits[ 1 ], "catweave_bear" ) && splits.size() == 2 )
-      return make_fn_expr( "catweave_bear", [ this ]() { return catweave_bear && talent.feral_affinity->ok(); } );
-    if ( util::str_compare_ci( splits[ 1 ], "owlweave_bear" ) && splits.size() == 2 )
-      return make_fn_expr( "owlweave_bear", [ this ]() { return owlweave_bear && talent.balance_affinity->ok(); } );
-    if (util::str_compare_ci(splits[1], "owlweave_cat") && splits.size() == 2)
-      return make_fn_expr( "owlweave_cat", [this]() { return owlweave_cat && talent.balance_affinity->ok(); });
+    if ( util::str_compare_ci( splits[1], "catweave_bear" ) && splits.size() == 2 )
+      return make_fn_expr( "catweave_bear", [this]() { return catweave_bear && talent.feral_affinity->ok(); } );
+    if ( util::str_compare_ci( splits[1], "owlweave_bear" ) && splits.size() == 2 )
+      return make_fn_expr( "owlweave_bear", [this]() { return owlweave_bear && talent.balance_affinity->ok(); } );
+    if ( util::str_compare_ci( splits[1], "owlweave_cat" ) && splits.size() == 2 )
+      return make_fn_expr( "owlweave_cat", [this]() { return owlweave_cat && talent.balance_affinity->ok(); } );
+    if ( util::str_compare_ci( splits[1], "no_cds" ) && splits.size() == 2 )
+      return make_fn_expr( "no_cds", [this]() { return no_cds; } );
   }
-  if ( splits[ 0 ] == "druid" &&
-       ( splits[ 2 ] == "ticks_gained_on_refresh" || splits[ 2 ] == "ticks_gained_on_refresh_pmultiplier" ) )
-  {
-    // Since we know some action names don't map to the actual dot portion, lets add some exceptions
-    // this may have to be made more robust if other specs are interested in using it, but for now lets
-    // default any ambiguity to what would make most sense for ferals.
-    if ( splits[ 1 ] == "rake" )
-      splits[ 1 ] = "rake_bleed";
-    if ( specialization() == DRUID_FERAL && splits[ 1 ] == "moonfire" )
-      splits[ 1 ] = "lunar_inspiration";
-
-    bool pmult_adjusted = false;
-
-    if ( splits[ 2 ] == "ticks_gained_on_refresh_pmultiplier" )
-      pmult_adjusted = true;
-
-    action_t* action = find_action( splits[ 1 ] );
-    if ( action )
-      return make_fn_expr( name_str, [ action, pmult_adjusted ]() -> double {
-        dot_t* dot             = action->get_dot();
-        double remaining_ticks = 0;
-        double potential_ticks = 0;
-        action_state_t* state  = action->get_state( dot->state );
-        timespan_t duration    = action->composite_dot_duration( state );
-        state->target = action->target = action->player->target;
-        timespan_t ttd                 = action->target->time_to_percent( 0 );
-        double pmult                   = 0;
-        // action->snapshot_state(state, result_amount_type::DMG_OVER_TIME);
-
-        if ( dot->is_ticking() )
-        {
-          remaining_ticks = std::min( dot->remains(), ttd ) / dot->current_action->tick_time( dot->state );
-          duration        = action->calculate_dot_refresh_duration( dot, duration );
-          remaining_ticks *= pmult_adjusted ? dot->state->persistent_multiplier : 1.0;
-        }
-
-        if ( pmult_adjusted )
-        {
-          action->snapshot_state( state, result_amount_type::NONE );
-          state->target = action->target;
-
-          pmult = action->composite_persistent_multiplier( state );
-        }
-
-        potential_ticks = std::min( duration, ttd ) / ( action->tick_time( state ) );
-        potential_ticks *= pmult_adjusted ? pmult : 1.0;
-
-        action_state_t::release( state );
-        return potential_ticks - remaining_ticks;
-      } );
-    throw std::invalid_argument( "invalid action" );
-  }
-
 
   if ( splits[ 0 ] == "action" && splits[ 1 ] == "ferocious_bite_max" && splits[ 2 ] == "damage" )
   {
@@ -9832,21 +9744,22 @@ void druid_t::create_options()
 {
   player_t::create_options();
 
-  add_option( opt_float( "predator_rppm", predator_rppm_rate ) );
-  add_option( opt_float( "initial_astral_power", initial_astral_power ) );
-  add_option( opt_int( "initial_moon_stage", initial_moon_stage ) );
-  add_option( opt_float( "eclipse_snapshot_period", eclipse_snapshot_period ) );
-  add_option( opt_bool( "catweave_bear", catweave_bear ) );
-  add_option( opt_bool( "owlweave_bear", owlweave_bear ) );
-  add_option( opt_bool( "owlweave_cat", owlweave_cat ) );
-  add_option( opt_bool( "affinity_resources", affinity_resources ) );
-  add_option( opt_float( "thorns_attack_period", thorns_attack_period ) );
-  add_option( opt_float( "thorns_hit_chance", thorns_hit_chance ) );
-  add_option( opt_float( "kindred_spirits_partner_dps", kindred_spirits_partner_dps ) );
-  add_option( opt_bool( "kindred_spirits_hide_partner", kindred_spirits_hide_partner ) );
-  add_option( opt_float( "kindred_spirits_absorbed", kindred_spirits_absorbed ) );
-  add_option( opt_float( "convoke_the_spirits_ultimate", convoke_the_spirits_ultimate ) );
-  add_option( opt_float( "adaptive_swarm_jump_distance", adaptive_swarm_jump_distance ) );
+  add_option( opt_float( "druid.predator_rppm", predator_rppm_rate ) );
+  add_option( opt_float( "druid.initial_astral_power", initial_astral_power ) );
+  add_option( opt_int( "druid.initial_moon_stage", initial_moon_stage ) );
+  add_option( opt_float( "druid.eclipse_snapshot_period", eclipse_snapshot_period ) );
+  add_option( opt_bool( "druid.catweave_bear", catweave_bear ) );
+  add_option( opt_bool( "druid.owlweave_bear", owlweave_bear ) );
+  add_option( opt_bool( "druid.owlweave_cat", owlweave_cat ) );
+  add_option( opt_bool( "druid.no_cds", no_cds ) );
+  add_option( opt_bool( "druid.affinity_resources", affinity_resources ) );
+  add_option( opt_float( "druid.thorns_attack_period", thorns_attack_period ) );
+  add_option( opt_float( "druid.thorns_hit_chance", thorns_hit_chance ) );
+  add_option( opt_float( "druid.kindred_spirits_partner_dps", kindred_spirits_partner_dps ) );
+  add_option( opt_bool( "druid.kindred_spirits_hide_partner", kindred_spirits_hide_partner ) );
+  add_option( opt_float( "druid.kindred_spirits_absorbed", kindred_spirits_absorbed ) );
+  add_option( opt_float( "druid.convoke_the_spirits_ultimate", convoke_the_spirits_ultimate ) );
+  add_option( opt_float( "druid.adaptive_swarm_jump_distance", adaptive_swarm_jump_distance ) );
 }
 
 // druid_t::create_profile ==================================================
@@ -10450,6 +10363,7 @@ void druid_t::copy_from( player_t* source )
   owlweave_bear                = p->owlweave_bear;
   catweave_bear                = p->catweave_bear;
   owlweave_cat                 = p->owlweave_cat;
+  no_cds                        = p->no_cds;
   kindred_spirits_partner_dps  = p->kindred_spirits_partner_dps;
   kindred_spirits_hide_partner = p->kindred_spirits_hide_partner;
   kindred_spirits_absorbed     = p->kindred_spirits_absorbed;

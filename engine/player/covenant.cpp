@@ -562,7 +562,7 @@ report::sc_html_stream& covenant_state_t::generate_report( report::sc_html_strea
 }
 
 // Conduit checking function for default profile generation in report_helper::check_gear()
-void covenant_state_t::check_conduits( util::string_view tier_name, int max_conduit_rank ) const
+void covenant_state_t::check_conduits( util::string_view tier_name, unsigned max_conduit_rank ) const
 {
   // Copied logic from covenant_state_t::generate_report(), feel free to improve it
   for ( const auto& e : conduit_entry_t::data( m_player->dbc->ptr ) )
@@ -574,7 +574,6 @@ void covenant_state_t::check_conduits( util::string_view tier_name, int max_cond
         unsigned int conduit_rank = std::get<1>( cd ) + 1;
         if ( conduit_rank != max_conduit_rank )
         {
-          auto conduit = m_player -> find_conduit_spell( e.name );
           m_player -> sim -> error( "Player {} has conduit {} equipped at rank {}, conduit rank for {} is {}.\n",
                                     m_player -> name(), e.name, conduit_rank, tier_name, max_conduit_rank );
         }
@@ -698,7 +697,7 @@ bool parse_blizzard_covenant_information( player_t*               player,
 
   // The rest of the code cannot be run because Blizzard API does not indicate the active
   // path.
-  return true;
+  //return true;
 
   if ( !covenant_data.HasMember( "soulbinds" ) || !covenant_data[ "soulbinds" ].IsArray() )
   {
@@ -708,7 +707,7 @@ bool parse_blizzard_covenant_information( player_t*               player,
   for ( auto i = 0u; i < covenant_data[ "soulbinds" ].Size(); ++i )
   {
     const auto& soulbind = covenant_data[ "soulbinds" ][ i ];
-    if ( !soulbind[ "is_active" ].GetBool() )
+    if ( !soulbind.HasMember( "is_active" ) || !soulbind[ "is_active" ].GetBool() )
     {
       continue;
     }

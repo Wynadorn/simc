@@ -697,8 +697,6 @@ public:
   bool dual_wield() const
   { return main_hand_weapon.type != WEAPON_NONE && off_hand_weapon.type != WEAPON_NONE; }
   bool has_shield_equipped() const;
-  /// Figure out if healing should be recorded
-  bool record_healing() const;
   specialization_e specialization() const
   { return _spec; }
   const char* primary_tree_name() const;
@@ -796,10 +794,7 @@ public:
   virtual void override_talent( util::string_view override_str );
   virtual void init_meta_gem();
   virtual void init_resources( bool force = false );
-  virtual std::string init_use_item_actions( const std::string& append = std::string() );
-  virtual std::string init_use_profession_actions( const std::string& append = std::string() );
-  virtual std::string init_use_racial_actions( const std::string& append = std::string() );
-  virtual std::vector<std::string> get_item_actions( const std::string& options = std::string() );
+  virtual std::vector<std::string> get_item_actions();
   virtual std::vector<std::string> get_profession_actions();
   virtual std::vector<std::string> get_racial_actions();
   virtual void init_target();
@@ -990,12 +985,12 @@ public:
   virtual void clear_debuffs();
   virtual void trigger_ready();
   virtual void schedule_ready( timespan_t delta_time = timespan_t::zero(), bool waiting = false );
-  virtual void schedule_off_gcd_ready( timespan_t delta_time = timespan_t::from_millis( 100 ) );
-  virtual void schedule_cwc_ready( timespan_t delta_time = timespan_t::from_millis( 100 ) );
+  virtual void schedule_off_gcd_ready( timespan_t delta_time = timespan_t::min() );
+  virtual void schedule_cwc_ready( timespan_t delta_time = timespan_t::min() );
   virtual void arise();
   virtual void demise();
   virtual timespan_t available() const
-  { return timespan_t::from_seconds( 0.1 ); }
+  { return rng().gauss( 100_ms, 10_ms ); }
   virtual action_t* select_action( const action_priority_list_t&, execute_type type = execute_type::FOREGROUND, const action_t* context = nullptr );
   virtual action_t* execute_action();
 
@@ -1006,6 +1001,8 @@ public:
   // Check whether the player has enough of a given resource.
   // The caller needs to ensure current resources are up to date (in particular with dynamic regen).
   virtual bool   resource_available( resource_e resource_type, double cost ) const;
+  /// Figure out if healing should be recorded
+  virtual bool record_healing() const;
   virtual resource_e primary_resource() const
   { return RESOURCE_NONE; }
   virtual role_e   primary_role() const;

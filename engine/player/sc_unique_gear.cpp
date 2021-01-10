@@ -3,6 +3,7 @@
 // Send questions to natehieter@gmail.com
 // ==========================================================================
 
+#include "sc_enums.hpp"
 #include "unique_gear.hpp"
 
 #include "unique_gear_shadowlands.hpp"
@@ -3129,6 +3130,10 @@ struct burning_mirror_t : public spell_t
 
 void item::mirror_of_the_blademaster( special_effect_t& effect )
 {
+  // Disabled because pet data is severely out of date.
+  effect.type = SPECIAL_EFFECT_NONE;
+  return;
+
   action_t* action = effect.player -> find_action( "burning_mirror" );
   if ( ! action )
   {
@@ -3543,6 +3548,11 @@ void generic::windfury_totem( special_effect_t& effect )
       atk->set_target( old_target );
     }
   };
+
+  if ( effect.player->is_enemy() || effect.player->type == HEALING_ENEMY )
+  {
+    return;
+  }
 
   // Apply rank 2 automatically
   effect.proc_chance_ = effect.driver()->proc_chance() +

@@ -648,6 +648,7 @@ public:
   std::string default_flask() const override;
   std::string default_food() const override;
   std::string default_rune() const override;
+  std::string default_temporary_enchant() const override;
 
   // overridden player_t stat functions
   double composite_armor() const override;
@@ -3135,7 +3136,7 @@ struct the_hunt_t : public demon_hunter_spell_t
       : demon_hunter_spell_t( name, p, p->covenant.the_hunt->effectN( 1 ).trigger() )
     {
       dual = true;
-      execute_action = p->get_background_action<the_hunt_dot_t>( "the_hunt_dot" );
+      impact_action = p->get_background_action<the_hunt_dot_t>( "the_hunt_dot" );
     }
   };
 
@@ -3143,9 +3144,9 @@ struct the_hunt_t : public demon_hunter_spell_t
     : demon_hunter_spell_t( "the_hunt", p, p->covenant.the_hunt, options_str )
   {
     movement_directionality = movement_direction_type::TOWARDS;
-    execute_action = p->get_background_action<the_hunt_damage_t>( "the_hunt_damage" );
-    execute_action->stats = stats;
-    execute_action->execute_action->stats = stats;
+    impact_action = p->get_background_action<the_hunt_damage_t>( "the_hunt_damage" );
+    impact_action->stats = stats;
+    impact_action->impact_action->stats = stats;
   }
 
   void execute() override
@@ -3153,6 +3154,9 @@ struct the_hunt_t : public demon_hunter_spell_t
     demon_hunter_spell_t::execute();
     p()->set_out_of_range( timespan_t::zero() ); // Cancel all other movement
   }
+
+  timespan_t travel_time() const
+  { return 100_ms; }
 };
 
 }  // end namespace spells
@@ -5044,7 +5048,7 @@ std::unique_ptr<expr_t> demon_hunter_t::create_expression( util::string_view nam
       demon_hunter_t* dh;
       soul_fragment type;
 
-      soul_fragments_expr_t( demon_hunter_t* p, util::string_view n, soul_fragment t, bool require_demon )
+      soul_fragments_expr_t( demon_hunter_t* p, util::string_view n, soul_fragment t )
         : expr_t( n ), dh( p ), type( t )
       {
       }
@@ -5056,7 +5060,6 @@ std::unique_ptr<expr_t> demon_hunter_t::create_expression( util::string_view nam
     };
 
     soul_fragment type = soul_fragment::LESSER;
-    bool require_demon = false;
 
     if ( name_str == "soul_fragments" )
     {
@@ -5071,7 +5074,7 @@ std::unique_ptr<expr_t> demon_hunter_t::create_expression( util::string_view nam
       type = soul_fragment::ANY_DEMON;
     }
 
-    return std::make_unique<soul_fragments_expr_t>( this, name_str, type, require_demon );
+    return std::make_unique<soul_fragments_expr_t>( this, name_str, type );
   }
   else if ( name_str == "cooldown.metamorphosis.adjusted_remains" )
   {
@@ -5657,6 +5660,14 @@ std::string demon_hunter_t::default_rune() const
          ( true_level >= 50 ) ? "battle_scarred" :
          ( true_level >= 45 ) ? "defiled" :
          ( true_level >= 40 ) ? "hyper" :
+         "disabled";
+}
+
+// demon_hunter_t::default_temporary_enchant =======================================
+
+std::string demon_hunter_t::default_temporary_enchant() const
+{
+  return ( true_level >= 60 ) ? "main_hand:shaded_sharpening_stone/off_hand:shaded_sharpening_stone" :
          "disabled";
 }
 

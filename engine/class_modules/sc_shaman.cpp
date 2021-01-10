@@ -706,7 +706,7 @@ public:
 
   // Weapon Enchants
   shaman_attack_t* windfury_mh;
-  shaman_spell_t* flametongue_oh, *flametongue_mh;
+  shaman_spell_t* flametongue;
   shaman_attack_t* hailstorm;
 
   // Elemental Spirits attacks
@@ -756,8 +756,7 @@ public:
 
     // Weapon Enchants
     windfury_mh = nullptr;
-    flametongue_mh = nullptr;
-    flametongue_oh = nullptr;
+    flametongue = nullptr;
     hailstorm   = nullptr;
 
     // Elemental Spirits attacks
@@ -2819,7 +2818,6 @@ struct stormstrike_attack_t : public shaman_attack_t
     background = true;
     may_miss = may_dodge = may_parry = false;
     weapon = w;
-    weapon_multiplier = 1.0;
     school = SCHOOL_PHYSICAL;
 
     base_multiplier *= 1.0 + p()->talent.elemental_assault->effectN( 1 ).percent();
@@ -3270,7 +3268,9 @@ struct lava_lash_t : public shaman_attack_t
       m *= 1.0 + p()->buff.hot_hand->data().effectN( 1 ).percent();
     }
 
-    if ( weapon->buff_type == FLAMETONGUE_IMBUE )
+    // Flametongue imbue only increases Lava Lash damage if it is imbued on the off-hand
+    // weapon
+    if ( p()->off_hand_weapon.buff_type == FLAMETONGUE_IMBUE )
     {
       m *= 1.0 + data().effectN( 2 ).percent();
     }
@@ -3569,13 +3569,39 @@ struct sundering_t : public shaman_attack_t
 
 struct weapon_imbue_t : public shaman_spell_t
 {
-  slot_e slot;
+  std::string slot_str;
+  slot_e slot, default_slot;
   imbue_e imbue;
 
-  weapon_imbue_t( const std::string& name, shaman_t* player, const spell_data_t* spell ) :
-    shaman_spell_t( name, player, spell ), slot( SLOT_INVALID ), imbue( IMBUE_NONE )
+  weapon_imbue_t( const std::string& name, shaman_t* player, slot_e d_, const spell_data_t* spell, const std::string& options_str ) :
+    shaman_spell_t( name, player, spell ), slot( SLOT_INVALID ), default_slot( d_ ), imbue( IMBUE_NONE )
   {
     harmful = false;
+
+    add_option( opt_string( "slot", slot_str ) );
+
+    parse_options( options_str );
+
+    if ( slot_str.empty() )
+    {
+      slot = default_slot;
+    }
+    else
+    {
+      slot = util::parse_slot_type( slot_str );
+    }
+  }
+
+  void init_finished() override
+  {
+    shaman_spell_t::init_finished();
+
+    if ( player->items[ slot ].active() &&
+         player->items[ slot ].parsed.temporary_enchant_id > 0 )
+    {
+      sim->error( "Player {} has a temporary enchant on slot {}, disabling {}",
+        player->name(), util::slot_type_string( slot ), name() );
+    }
   }
 
   void execute() override
@@ -3610,61 +3636,44 @@ struct weapon_imbue_t : public shaman_spell_t
 };
 
 // Windfury Imbue =========================================================
+
 struct windfury_weapon_t : public weapon_imbue_t
 {
   windfury_weapon_t( shaman_t* player, const std::string& options_str ) :
-    weapon_imbue_t( "windfury_weapon", player, player->find_specialization_spell( "Windfury Weapon" ) )
+    weapon_imbue_t( "windfury_weapon", player, SLOT_MAIN_HAND,
+                    player->find_specialization_spell( "Windfury Weapon" ), options_str )
   {
-    parse_options( options_str );
-
-    slot = SLOT_MAIN_HAND;
     imbue = WINDFURY_IMBUE;
 
-    add_child( player->windfury_mh );
+    if ( slot == SLOT_MAIN_HAND )
+    {
+      add_child( player->windfury_mh );
+    }
+    // Technically, you can put Windfury on the off-hand slot but it disables the proc
+    else if ( slot == SLOT_OFF_HAND )
+    {
+      ;
+    }
+    else
+    {
+      sim->error( "{} invalid windfury slot '{}'", player->name(), slot_str );
+    }
   }
 };
 
 // Flametongue Imbue =========================================================
+
 struct flametongue_weapon_t : public weapon_imbue_t
 {
   flametongue_weapon_t( shaman_t* player, const std::string& options_str ) :
-    weapon_imbue_t( "flametongue_weapon", player, player->find_spell( "Flametongue Weapon" ) )
+    weapon_imbue_t( "flametongue_weapon", player,
+                    SLOT_OFF_HAND, player->find_spell( "Flametongue Weapon" ), options_str )
   {
-    std::string slot_str;
-
-    add_option( opt_string( "slot", slot_str ) );
-
-    parse_options( options_str );
-
     imbue = FLAMETONGUE_IMBUE;
 
-    /*
-    std::array<std::unique_ptr<option_t>, 1> options { {
-      opt_string( "slot", slot_str )
-    } };
-
-    opts::parse( sim, "player", options, options_str,
-      []( opts::parse_status, util::string_view, util::string_view ) {
-        return opts::parse_status::OK;
-    } );
-    */
-
-    if ( slot_str.empty() )
+    if ( slot == SLOT_MAIN_HAND || slot == SLOT_OFF_HAND )
     {
-      slot = SLOT_OFF_HAND;
-    }
-    else
-    {
-      slot = util::parse_slot_type( slot_str );
-    }
-
-    if ( slot == SLOT_OFF_HAND )
-    {
-      add_child( player->flametongue_oh );
-    }
-    else if ( slot == SLOT_MAIN_HAND )
-    {
-      add_child( player->flametongue_mh );
+      add_child( player->flametongue );
     }
     else
     {
@@ -8012,7 +8021,9 @@ void shaman_t::trigger_windfury_weapon( const action_state_t* state )
     return;
   }
 
-  if ( main_hand_weapon.buff_type != WINDFURY_IMBUE )
+  // Note, applying Windfury-imbue to off-hand disables procs in game.
+  if ( main_hand_weapon.buff_type != WINDFURY_IMBUE ||
+      off_hand_weapon.buff_type == WINDFURY_IMBUE )
   {
     return;
   }
@@ -8118,19 +8129,9 @@ void shaman_t::trigger_flametongue_weapon( const action_state_t* state )
     return;
   }
 
-  if ( main_hand_weapon.buff_type == FLAMETONGUE_IMBUE )
-  {
-    flametongue_mh->set_target( state->target );
-    flametongue_mh->execute();
-    attack->proc_ft->occur();
-  }
-
-  if ( off_hand_weapon.buff_type == FLAMETONGUE_IMBUE )
-  {
-    flametongue_oh->set_target( state->target );
-    flametongue_oh->execute();
-    attack->proc_ft->occur();
-  }
+  flametongue->set_target( state->target );
+  flametongue->execute();
+  attack->proc_ft->occur();
 }
 
 void shaman_t::trigger_lightning_shield( const action_state_t* state )
@@ -8537,11 +8538,13 @@ std::string shaman_t::default_temporary_enchant() const
     case SHAMAN_ELEMENTAL:
       if ( true_level >= 60 )
         return "main_hand:shadowcore_oil";
+      SC_FALLTHROUGH;
     case SHAMAN_ENHANCEMENT:
       return "disabled";
     case SHAMAN_RESTORATION:
       if ( true_level >= 60 )
         return "main_hand:shadowcore_oil";
+      SC_FALLTHROUGH;
     default:
       return "disabled";
   }
@@ -8656,7 +8659,8 @@ void shaman_t::init_action_list_elemental()
                                   "if=(spell_targets.chain_lightning>1)&(!dot.flame_shock.refreshable)" );
     se_single_target->add_action(
         this, "Earth Shock",
-        "if=spell_targets.chain_lightning<2&maelstrom>=60&(buff.wind_gust.stack<20|maelstrom>90)" );
+        "if=spell_targets.chain_lightning<2&maelstrom>=60&(buff.wind_gust.stack<20|maelstrom>90)|(runeforge.echoes_of_"
+        "great_sundering.equipped&!buff.echoes_of_great_sundering.up)" );
     se_single_target->add_action( this, "Lightning Bolt",
                                "if=(buff.stormkeeper.remains<1.1*gcd*buff.stormkeeper.stack|buff.stormkeeper.up&buff."
                                "master_of_the_elements.up)" );
@@ -8872,8 +8876,9 @@ void shaman_t::init_action_list_enhancement()
   def->add_action( "bag_of_tricks,if=!talent.ascendance.enabled|!buff.ascendance.up" );
 
   def->add_action( this, "Feral Spirit" );
-  def->add_talent( this, "Ascendance" );
-  def->add_action( this, "Windfury Totem", "if=runeforge.doom_winds.equipped&buff.doom_winds_debuff.down");
+  def->add_action("fae_transfusion,if=(talent.ascendance.enabled|runeforge.doom_winds.equipped)&(soulbind.grove_invigoration|soulbind.field_of_blossoms|active_enemies=1)");
+  def->add_talent( this, "Ascendance", "if=raid_event.adds.in>=90|active_enemies>1" );
+  def->add_action( this, "Windfury Totem", "if=runeforge.doom_winds.equipped&buff.doom_winds_debuff.down&(raid_event.adds.in>=60|active_enemies>1)");
   def->add_action( "call_action_list,name=single,if=active_enemies=1", "If only one enemy, priority follows the 'single' action list." );
   def->add_action( "call_action_list,name=aoe,if=active_enemies>1", "On multiple enemies, the priority follows the 'aoe' action list." );
 
@@ -8900,7 +8905,7 @@ void shaman_t::init_action_list_enhancement()
   single->add_action(this, "Flame Shock", "target_if=refreshable");
   single->add_action(this, "Frost Shock");
   single->add_talent(this, "Ice Strike");
-  single->add_talent(this, "Sundering");
+  single->add_talent(this, "Sundering", "if=raid_event.adds.in>=40");
   single->add_talent(this, "Fire Nova", "if=active_dot.flame_shock");
   single->add_action(this, "Lightning Bolt", "if=buff.maelstrom_weapon.stack>=5");
   single->add_action(this, "Earth Elemental");
@@ -8908,7 +8913,9 @@ void shaman_t::init_action_list_enhancement()
 
   aoe->add_action("windstrike,if=buff.crash_lightning.up");
   aoe->add_action("fae_transfusion,if=soulbind.grove_invigoration|soulbind.field_of_blossoms");
+  aoe->add_action(this, "Crash Lightning", "if=runeforge.doom_winds.equipped&buff.doom_winds.up");
   aoe->add_action(this, "Frost Shock", "if=buff.hailstorm.up");
+  aoe->add_talent(this, "Sundering");
   aoe->add_action(this, "Flame Shock", "target_if=refreshable,cycle_targets=1,if=talent.fire_nova.enabled|talent.lashing_flames.enabled|covenant.necrolord");
   aoe->add_action("primordial_wave,target_if=min:dot.flame_shock.remains,cycle_targets=1,if=!buff.primordial_wave.up");
   aoe->add_talent(this, "Fire Nova", "if=active_dot.flame_shock>=3");
@@ -8924,8 +8931,8 @@ void shaman_t::init_action_list_enhancement()
   aoe->add_talent(this, "Stormkeeper", "if=buff.maelstrom_weapon.stack>=5");
   aoe->add_action(this, "Chain Lightning", "if=buff.maelstrom_weapon.stack=10");
   aoe->add_action(this, "Flame Shock", "target_if=refreshable,cycle_targets=1,if=talent.fire_nova.enabled");
-  aoe->add_talent(this, "Sundering");
   aoe->add_action(this, "Lava Lash", "target_if=min:debuff.lashing_flames.remains,cycle_targets=1,if=runeforge.primal_lava_actuators.equipped&buff.primal_lava_actuators.stack>6");
+  aoe->add_action(this, "Chain Lightning", "if=buff.maelstrom_weapon.stack>=5&active_enemies>=3");
   aoe->add_action("windstrike");
   aoe->add_action(this, "Stormstrike");
   aoe->add_action(this, "Lava Lash");
@@ -9015,8 +9022,7 @@ void shaman_t::init_action_list()
   {
     windfury_mh = new windfury_attack_t( "windfury_attack", this, find_spell( 25504 ), &( main_hand_weapon ) );
 
-    flametongue_mh = new flametongue_weapon_spell_t( "flametongue_attack_mh", this, &( main_hand_weapon ) );
-    flametongue_oh = new flametongue_weapon_spell_t( "flametongue_attack", this, &( off_hand_weapon ) );
+    flametongue = new flametongue_weapon_spell_t( "flametongue_attack", this, &( off_hand_weapon ) );
 
     icy_edge = new icy_edge_attack_t( "icy_edge", this, &( main_hand_weapon ) );
 
