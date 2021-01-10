@@ -1,0 +1,166 @@
+#https://github.com/simulationcraft/simc/wftiki/
+#Character
+    paladin="Wynadorn"
+    level=60
+    race=human
+    region=eu
+    server=azjolnerub
+    role=dps
+    position=back
+    professions=blacksmithing=66/engineering=90
+    talents=1131123
+    spec=retribution
+
+    covenant=kyrian
+    soulbind=pelagos:7,328266/182:5/328261/129:5/328263/216:4
+    # soulbind=kleia:13,329791/197:5/329776/159:4/329784/133:5
+    # conduits_available=164:5/167:5/176:5/177:5/182:5/184:5/193:5/194:5/195:5/196:5/216:4/142:3/159:4/161:5/129:5/133:5/141:5/197:5/209:5
+    # renown=21
+#
+#Gear 
+    head=,id=184660,bonus_id=6652/7193
+    neck=,id=183040,bonus_id=7188/6652/7193/1485/6646
+    shoulder=,id=178820,bonus_id=7213/6652/1501/5884/6646
+    back=,id=178755,enchant_id=6203,bonus_id=7207/6652/1501/5858/6646
+    chest=,id=182987,enchant_id=6216,bonus_id=7188/6652/1485/6646
+    shirt=,id=98086
+    tabard=,id=46874
+    wrist=,id=183018,enchant_id=6222,bonus_id=7189/6652/7193/1472/6646
+    hands=,id=178706,bonus_id=7212/6652/1501/5865/6646
+    waist=,id=183025,bonus_id=7188/6652/7194/1485/6646
+    legs=,id=178701,bonus_id=7212/6652/1501/5865/6646
+    feet=,id=183027,enchant_id=6212,bonus_id=7188/6652/1485/6646
+    finger1=,id=179355,enchant_id=6166,bonus_id=7211/6652/7194/1501/5865/6646
+    finger2=,id=178824,enchant_id=6165,bonus_id=7210/6652/7193/1501/5861/6646
+    trinket1=,id=175921,bonus_id=6628/1472/6646
+    trinket2=,id=178298,bonus_id=6782/1498/6646
+    main_hand=,id=178780,enchant_id=6229,bonus_id=7210/41/1501/5861/6646
+#
+#Buffs & Consumables
+    #potion=phantom_fire
+    potion=potion_of_prolonged_power
+    flask=spectral_flask_of_power
+    food=Surprisingly_Palatable_Feast
+    #augmentation=veiled
+    #temporary_enchant=main_hand:shadowcore_oil
+    temporary_enchant=main_hand:shaded_sharpening_stone
+    optimal_raid=1
+    override.bloodlust=1
+#
+##Pre-Combat APL
+#    actions.precombat=flask
+#    actions.precombat+=/food
+#    #actions.precombat+=/augmentation
+#    actions.precombat+=/devotion_aura
+#
+#    # Snapshot raid buffed stats before combat begins and pre-potting is done.
+#    actions.precombat+=/snapshot_stats
+#    actions.precombat+=/potion
+#    actions=auto_attack
+##
+##Protection APL
+#    actions+=/call_action_list,name=protection
+#    actions.protection=call_action_list,name=protection_cooldowns
+#    actions.protection+=/call_action_list,name=protection_standard
+#
+#    actions.protection_cooldowns=fireblood,if=buff.avenging_wrath.up
+#    actions.protection_cooldowns+=/seraphim
+#    actions.protection_cooldowns+=/avenging_wrath
+#    actions.protection_cooldowns+=/holy_avenger,if=buff.avenging_wrath.up|cooldown.avenging_wrath.remains>60
+#    actions.protection_cooldowns+=/potion,if=buff.avenging_wrath.up
+#    actions.protection_cooldowns+=/use_items,if=buff.seraphim.up|!talent.seraphim.enabled
+#    actions.protection_cooldowns+=/moment_of_glory,if=prev_gcd.1.avengers_shield&cooldown.avengers_shield.remains
+#    actions.protection_cooldowns+=/heart_essence
+#
+#    actions.protection_standard=variable,name=can_cast_how,value=1,if=target.health.pct<20|buff.avenging_wrath.remains>gcd.remains
+#    actions.protection_standard+=/variable,op=set,name=hp_next_gcd,value=1,if=cooldown.avengers_shield.remains<gcd.max|cooldown.judgment.remains<gcd.max|cooldown.hammer_of_the_righteous.remains<gcd.max|(cooldown.hammer_of_wrath.remains<gcd.max&variable.can_cast_how=1)
+#
+#    actions.protection_standard=shield_of_the_righteous,target_if=debuff.judgment.remains
+#    actions.protection_standard+=/shield_of_the_righteous,if=(variable.hp_next_gcd=1)
+#    actions.protection_standard+=/hammer_of_wrath
+#    actions.protection_standard+=/judgment,if=charges=2
+#    actions.protection_standard+=/divine_toll
+#    actions.protection_standard+=/avengers_shield
+#    actions.protection_standard+=/consecration,if=!consecration.up
+#    actions.protection_standard+=/judgment,target_if=!debuff.judgment.remains
+#    actions.protection_standard+=/hammer_of_the_righteous
+#    actions.protection_standard+=/judgment
+#    actions.protection_standard+=/consecration
+#    actions.protection_standard+=/word_of_glory,if=buff.shining_light_free.up
+#
+#Retribution APL
+    #actions+=/call_action_list,name=retribution
+    #actions.retribution=call_action_list,name=retribution_cooldowns
+    #actions.retribution+=/call_action_list,name=retribution_generators
+
+    #actions.retribution_cooldowns=avenging_wrath,if=holy_power>=3&time_to_hpg=0
+    #actions.retribution_cooldowns+=/shield_of_vengeance
+    #actions.retribution_cooldowns+=/use_items,if=buff.avenging_wrath.up
+
+    #actions.retribution_finishers=templars_verdict
+
+    #actions.retribution_generators=call_action_list,name=retribution_finishers,if=holy_power>=5
+    #actions.retribution_generators+=/divine_toll,if=!debuff.judgment.up
+    #actions.retribution_generators+=/wake_of_ashes,if=holy_power<=2
+    #actions.retribution_generators+=/hammer_of_wrath
+    #actions.retribution_generators+=/blade_of_justice,if=holy_power<=3
+    #actions.retribution_generators+=/judgment,if=!debuff.judgment.up
+    #actions.retribution_generators+=/call_action_list,name=retribution_finishers,if=(target.health.pct<=20|buff.avenging_wrath.up)
+
+    #actions.retribution_generators+=/crusader_strike,if=cooldown.crusader_strike.charges=2
+    #actions.retribution_generators+=/call_action_list,name=retribution_finishers
+
+    #actions.retribution_generators+=/consecration,if=!consecration.up
+    #actions.retribution_generators+=/crusader_strike
+    #actions.retribution_generators+=/consecration,if=time_to_hpg>gcd
+#Basic Options
+    #confidence=0.9
+    target_error=0.1
+    #iterations=50
+    max_time=300
+    vary_combat_length=0.2
+    fixed_time=0
+    #reference_player=Wynadorn
+#
+#Fight Set-up
+    #Patchwerk, CastingPatchwerk, LightMovement, HeavyMovement, DungeonSlice, HecticAddCleave, HelterSkelter, CleaveAdd, Beastlord, Ultraxion
+    fight_style=Patchwerk
+#
+#Latency
+    #strict_gcd_queue=1
+    #gcd_lag=0.05
+    #gcd_lag_stddev=0.01
+#
+#multithreading
+    threads=8
+    process_priority=normal
+#
+#Output
+    html=T26_Paladin_Protection.simc.html
+    report_details=1
+    #log=0
+    #output=log.txt
+#
+#Scales
+    #default, dps, tmi, deaths, avg_death, min_death, dmg_taken
+    scale_over=tmi
+    calculate_scale_factors=1
+
+    scale_only=weapon_dps,strength,haste,crit,mastery,versatility
+    #scale_only=weapon_dps,strength,haste,crit,mastery,versatility,stamina,armor
+
+    center_scale_delta=1
+    #positive_scale_delta=1
+    #scale_delta_multiplier=1.0
+    #scale_haste_iterations=1.0
+#
+#Stat Plotting
+    #dps_plot_stat=haste,crit
+    #dps_plot_points=20
+    #dps_plot_step=160
+    #dps_plot_positive=0
+    
+    #reforge_plot_stat=crit,haste
+    #reforge_plot_amount=200
+    #reforge_plot_step=20
+    #reforge_plot_output_file=plot.csv
